@@ -2,6 +2,7 @@ class Tokenizer:
 
     def __init__(self, vocab_path):
         self.vocab_path = vocab_path
+        self.__load_vocab()
 
 
     def __load_vocab(self):
@@ -14,7 +15,7 @@ class Tokenizer:
         self.vocab_size = len(self.idx2word)
 
 
-    def tokenize(self, sentence):
+    def __call__(self, sentence):
         if isinstance(sentence, str):
             return self.tokenize_single_sentence(sentence)
         elif isinstance(sentence, list):
