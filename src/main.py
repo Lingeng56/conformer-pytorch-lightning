@@ -8,7 +8,7 @@ from tokenizer import Tokenizer
 
 
 def train(args):
-    tokenizer = Tokenizer()
+    tokenizer = Tokenizer(args.vocab_path)
     train_dataset = CustomDataset(data_dir=args.train_data_dir, url=args.train_url, tokenizer=tokenizer)
     test_dataset = CustomDataset(data_dir=args.test_data_dir, url=args.test_url, tokenizer=tokenizer)
     train_dataloader = DataLoader(train_dataset,
@@ -42,5 +42,21 @@ def train(args):
 
 
 
-def main(args):
+def evaluate(args):
     pass
+
+
+def main(args):
+    if args.train:
+        train(args)
+
+    if args.eval:
+        evaluate(args)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        prog='Conformer-Pytorch-Lightning',
+        description='Pytorch-Lightning Implementation of Conformer')
+    all_args = parser.parse_args()
+    main(all_args)
