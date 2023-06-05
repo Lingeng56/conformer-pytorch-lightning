@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from encoder import ConformerEncoder
-from decoder import LSTMDecoder
+from layers.encoder import ConformerEncoder
+from layers.decoder import LSTMDecoder
 from torchmetrics import WordErrorRate
 
 
@@ -19,9 +19,9 @@ class ASRModel(pl.LightningModule):
                  encoder_layer_nums,
                  decoder_dim,
                  vocab_size,
+                 tokenizer,
                  max_len,
                  lr,
-
                  use_relative=False):
         super(ASRModel, self).__init__()
         self.encoder = ConformerEncoder(input_dim,
@@ -33,7 +33,7 @@ class ASRModel(pl.LightningModule):
                                         encoder_layer_nums,
                                         max_len,
                                         use_relative)
-        self.decoder = LSTMDecoder(encoder_dim, decoder_dim, vocab_size)
+        self.decoder = LSTMDecoder(encoder_dim, decoder_dim, vocab_size, tokenizer)
         self.criterion = nn.CTCLoss(blank=28, zero_infinity=False)
         self.metric = WordErrorRate()
         self.lr = lr
@@ -59,21 +59,21 @@ class ASRModel(pl.LightningModule):
         loss = self.criterion(probs, targets, output_lengths, target_lengths)
         self.metric.update(preds, sentences)
 
-        self.log('training_loss', loss)
+        self.log('val_loss', loss)
         self.log('word_error_rate', self.metric)
-
-
-
-
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        pass
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.encoder.parameters(), lr=self.lr)
-        pass
-
-    def lr_scheduler_step(self, scheduler, metric) -> None:
-        pass
+        return {
+            "optimizer": optimizer
+            # "lr_scheduler": {
+            #     "scheduler": ReduceLROnPlateau(optimizer, ...),
+            #     "monitor": "metric_to_track",
+            #     "frequency": "indicates how often the metric is updated"
+            #     # If "monitor" references validation metrics, then "frequency" should be set to a
+            #     # multiple of "trainer.check_val_every_n_epoch".
+            # },
+        }
 
 
 
