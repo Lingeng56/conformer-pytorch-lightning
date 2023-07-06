@@ -33,7 +33,9 @@ def train(args):
                      tokenizer=tokenizer,
                      max_len=args.max_len,
                      lr=args.lr,
-                     use_relative=args.use_relative)
+                     use_relative=args.use_relative,
+                     decode_method=args.decode_method,
+                     beam_size=args.beam_size)
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_wer',
@@ -99,6 +101,8 @@ if __name__ == '__main__':
     parser.add_argument('--use_relative', action='store_true')
     parser.add_argument('--checkpoint_path', type=str, required=True)
     parser.add_argument('--num_devices', type=int, required=True, default=2)
+    parser.add_argument('--decode_method', type=str, required=True)
+    parser.add_argument('--beam_size', type=int, default=5)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--eval', action='store_true')
     all_args = parser.parse_args()

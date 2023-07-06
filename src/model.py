@@ -23,6 +23,8 @@ class ASRModel(pl.LightningModule):
                  tokenizer,
                  max_len,
                  lr,
+                 decode_method,
+                 beam_size=-1,
                  use_relative=False):
         super(ASRModel, self).__init__()
         self.encoder = ConformerEncoder(input_dim,
@@ -33,11 +35,14 @@ class ASRModel(pl.LightningModule):
                                         num_heads,
                                         encoder_layer_nums,
                                         max_len,
-                                        use_relative)
+                                        use_relative
+                                        )
         self.decoder = LSTMDecoder(encoder_dim, decoder_dim, decoder_layer_nums, vocab_size, tokenizer)
         self.criterion = nn.CTCLoss(blank=0, zero_infinity=False)
         self.metric = WordErrorRate()
         self.lr = lr
+        self.decode_method = decode_method
+        self.beam_size = beam_size
 
 
 
@@ -57,7 +62,7 @@ class ASRModel(pl.LightningModule):
 
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         probs = self.decoder(outputs)
-        preds = self.decoder.decode(outputs)
+        preds = self.decoder.decode(outputs, output_lengths, self.decode_method, self.beam_size)
         loss = self.criterion(probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         self.metric.update(preds, sentences)
 
@@ -66,8 +71,8 @@ class ASRModel(pl.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         inputs, input_lengths = batch['inputs'], batch['input_lengths']
-        outputs, output_lengths = self.encoder(inputs, input_lengths)
-        preds = self.decoder.decode(outputs)
+        outputs, output_lengths = self.encoder(inputs, input_lengths, self.decode_method, self.beam_size)
+        preds = self.decoder.decode(outputs, output_lengths)
         return preds
 
 
