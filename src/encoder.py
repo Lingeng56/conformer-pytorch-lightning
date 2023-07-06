@@ -16,7 +16,7 @@ class ConformerEncoder(nn.Module):
                  max_len,
                  use_relative=False):
         super(ConformerEncoder, self).__init__()
-        self.subsampling = ConvolutionSubSampling(in_channels=input_dim, out_channels=encoder_dim)
+        self.subsampling = ConvolutionSubSampling(in_channels=1, out_channels=encoder_dim)
         self.fc = nn.Linear(encoder_dim * (((input_dim - 1) // 2 - 1) // 2), encoder_dim)
         self.dropout = nn.Dropout(dropout)
         self.conformer_blocks = nn.ModuleList(
@@ -38,5 +38,6 @@ class ConformerEncoder(nn.Module):
         outputs, output_lengths = self.subsampling(inputs, input_lengths)
         outputs = self.fc(outputs)
         outputs = self.dropout(outputs)
-        outputs = self.conformer_blocks(outputs)
+        for block in self.conformer_blocks:
+            outputs = block(outputs)
         return outputs, output_lengths

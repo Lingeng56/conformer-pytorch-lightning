@@ -6,10 +6,10 @@ class FeedForwardModule(nn.Module):
     def __init__(self, input_dim, dropout, expansion_factor):
         super(FeedForwardModule, self).__init__()
         self.layer_norm = nn.LayerNorm(input_dim)
-        self.fc1 = nn.Linear(input_dim, input_dim * expansion_factor)
+        self.fc1 = nn.Linear(input_dim, int(input_dim * expansion_factor))
         self.swish = nn.SiLU()
         self.dropout1 = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(input_dim * expansion_factor, input_dim)
+        self.fc2 = nn.Linear(int(input_dim * expansion_factor), input_dim)
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, inputs):

@@ -1,11 +1,11 @@
 import argparse
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint
-from src.model import ASRModel
-from src.dataset import CustomDataset
+from pytorch_lightning.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
+from model import ASRModel
+from dataset import CustomDataset
 from torch.utils.data import DataLoader
-from src.utils import collate_fn
-from src.tokenizer import Tokenizer
+from utils import collate_fn
+from tokenizer import Tokenizer
 
 
 def train(args):
@@ -26,6 +26,7 @@ def train(args):
                      expansion_factor=args.expansion_factor,
                      num_heads=args.num_heads,
                      encoder_layer_nums=args.encoder_layer_nums,
+                     decoder_layer_nums=args.decoder_layer_nums,
                      decoder_dim=args.decoder_dim,
                      vocab_size=tokenizer.vocab_size,
                      tokenizer=tokenizer,
@@ -45,7 +46,9 @@ def train(args):
     trainer = pl.Trainer(
         devices=args.num_devices,
         accelerator='gpu',
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback,
+                   RichModelSummary(),
+                   RichProgressBar()],
         check_val_every_n_epoch=1,
         max_epochs=args.max_epochs,
         precision=32,
@@ -75,7 +78,9 @@ if __name__ == '__main__':
         description='Pytorch-Lightning Implementation of Conformer')
     parser.add_argument('--max_epochs', type=int, required=True, default=10)
     parser.add_argument('--train_data_dir', type=str, required=True)
+    parser.add_argument('--train_url', type=str, required=True)
     parser.add_argument('--test_data_dir', type=str, required=True)
+    parser.add_argument('--test_url', type=str, required=True)
     parser.add_argument('--vocab_path', type=str, required=True)
     parser.add_argument('--train_batch_size', type=int, required=True, default=32)
     parser.add_argument('--eval_batch_size', type=int, required=True, default=32)
@@ -83,9 +88,10 @@ if __name__ == '__main__':
     parser.add_argument('--kernel_size', type=int, required=True, default=32)
     parser.add_argument('--encoder_dim', type=int, required=True, default=256)
     parser.add_argument('--dropout', type=float, required=True, default=0.3)
-    parser.add_argument('--expansion_factor', type=float, required=True, default=0.2)
+    parser.add_argument('--expansion_factor', type=int, required=True, default=2)
     parser.add_argument('--num_heads', type=int, required=True, default=4)
-    parser.add_argument('--encoder_layer_num', type=int, required=True, default=4)
+    parser.add_argument('--encoder_layer_nums', type=int, required=True, default=4)
+    parser.add_argument('--decoder_layer_nums', type=int, required=True, default=4)
     parser.add_argument('--decoder_dim', type=int, required=True, default=32)
     parser.add_argument('--max_len', type=int, required=True, default=512)
     parser.add_argument('--lr', type=float, required=True, default=1e-5)

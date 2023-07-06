@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from layers.encoder import ConformerEncoder
-from layers.decoder import LSTMDecoder
+from encoder import ConformerEncoder
+from decoder import LSTMDecoder
 from torchmetrics import WordErrorRate
 
 
@@ -17,6 +17,7 @@ class ASRModel(pl.LightningModule):
                  expansion_factor,
                  num_heads,
                  encoder_layer_nums,
+                 decoder_layer_nums,
                  decoder_dim,
                  vocab_size,
                  tokenizer,
@@ -33,8 +34,8 @@ class ASRModel(pl.LightningModule):
                                         encoder_layer_nums,
                                         max_len,
                                         use_relative)
-        self.decoder = LSTMDecoder(encoder_dim, decoder_dim, vocab_size, tokenizer)
-        self.criterion = nn.CTCLoss(blank=-1, zero_infinity=False)
+        self.decoder = LSTMDecoder(encoder_dim, decoder_dim, decoder_layer_nums, vocab_size, tokenizer)
+        self.criterion = nn.CTCLoss(blank=0, zero_infinity=False)
         self.metric = WordErrorRate()
         self.lr = lr
 
@@ -45,7 +46,7 @@ class ASRModel(pl.LightningModule):
         inputs, input_lengths, targets, target_lengths = batch['inputs'], batch['input_lengths'], batch['targets'], batch['target_lengths']
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         probs = self.decoder(outputs)
-        loss = self.criterion(probs, targets, output_lengths, target_lengths)
+        loss = self.criterion(probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         self.log('training_loss', loss)
         return loss
 
@@ -53,10 +54,11 @@ class ASRModel(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         inputs, input_lengths, targets, target_lengths, sentences = batch['inputs'], batch['input_lengths'], batch['targets'], \
                                                          batch['target_lengths'], batch['sentences']
+
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         probs = self.decoder(outputs)
-        preds = self.decoder.decode(probs)
-        loss = self.criterion(probs, targets, output_lengths, target_lengths)
+        preds = self.decoder.decode(outputs)
+        loss = self.criterion(probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         self.metric.update(preds, sentences)
 
         self.log('val_loss', loss)
@@ -65,8 +67,7 @@ class ASRModel(pl.LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         inputs, input_lengths = batch['inputs'], batch['input_lengths']
         outputs, output_lengths = self.encoder(inputs, input_lengths)
-        probs = self.decoder(outputs)
-        preds = self.decoder.decode(probs)
+        preds = self.decoder.decode(outputs)
         return preds
 
 

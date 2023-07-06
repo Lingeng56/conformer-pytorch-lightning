@@ -13,8 +13,8 @@ class CustomDataset(Dataset):
                                    download=True)
         self.tokenizer = tokenizer
         self.mfcc_transform = transforms.MFCC(sample_rate=16000,
-                                              n_mfcc=13,
-                                              melkwargs={'n_fft': 400, 'hop_length': 160, 'n_mels': 23, 'center': False}
+                                              n_mfcc=40,
+                                              melkwargs={'n_fft': 400, 'hop_length': 160, 'n_mels': 40, 'center': False}
                                               )
 
     def __getitem__(self, index):

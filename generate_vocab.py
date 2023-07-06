@@ -17,7 +17,7 @@ def generate_vocab(data_dirs, vocab_path):
                     vocab.add(word)
 
     with open(vocab_path, 'w') as f:
-        f.write('<BOS>\n<EOS>\n')
+        f.write(' \n<BOS>\n<EOS>\n')
         for word in vocab:
             f.write(word + '\n')
 

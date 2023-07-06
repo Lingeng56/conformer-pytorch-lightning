@@ -25,7 +25,8 @@ class ConformerBlock(nn.Module):
                                                           max_len)
 
         self.conv = ConvolutionModule(encoder_dim,
-                                      kernel_size)
+                                      kernel_size,
+                                      expansion_factor)
 
         self.feed_forward_two = FeedForwardModule(encoder_dim,
                                                   dropout,
