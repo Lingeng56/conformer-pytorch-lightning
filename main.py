@@ -1,11 +1,11 @@
 import argparse
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
-from model import ASRModel
-from dataset import CustomDataset
+from src.model import ASRModel
+from src.dataset import CustomDataset
 from torch.utils.data import DataLoader
-from utils import collate_fn
-from tokenizer import Tokenizer
+from src.utils import collate_fn
+from src.tokenizer import Tokenizer
 
 
 def train(args):
@@ -93,5 +93,6 @@ if __name__ == '__main__':
     parser.add_argument('--checkpoint_path', type=str, required=True)
     parser.add_argument('--num_devices', type=int, required=True, default=2)
     parser.add_argument('--train', action='store_true')
+    parser.add_argument('--eval', action='store_true')
     all_args = parser.parse_args()
     main(all_args)
