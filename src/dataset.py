@@ -1,3 +1,4 @@
+import torch
 from torchaudio.datasets import LIBRISPEECH
 from torch.utils.data import Dataset
 
@@ -14,7 +15,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         wav, _, sentence, _, _, _ = self.dataset[index]
         target = self.tokenizer(sentence)
-        return wav, target, sentence
+        return wav, torch.LongTensor(target), sentence
 
     def __len__(self):
         return len(self.dataset)

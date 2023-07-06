@@ -34,7 +34,7 @@ class ASRModel(pl.LightningModule):
                                         max_len,
                                         use_relative)
         self.decoder = LSTMDecoder(encoder_dim, decoder_dim, vocab_size, tokenizer)
-        self.criterion = nn.CTCLoss(blank=28, zero_infinity=False)
+        self.criterion = nn.CTCLoss(blank=-1, zero_infinity=False)
         self.metric = WordErrorRate()
         self.lr = lr
 
@@ -60,20 +60,19 @@ class ASRModel(pl.LightningModule):
         self.metric.update(preds, sentences)
 
         self.log('val_loss', loss)
-        self.log('word_error_rate', self.metric)
+        self.log('val_wer', self.metric)
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        inputs, input_lengths = batch['inputs'], batch['input_lengths']
+        outputs, output_lengths = self.encoder(inputs, input_lengths)
+        probs = self.decoder(outputs)
+        preds = self.decoder.decode(probs)
+        return preds
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.encoder.parameters(), lr=self.lr)
-        return {
-            "optimizer": optimizer
-            # "lr_scheduler": {
-            #     "scheduler": ReduceLROnPlateau(optimizer, ...),
-            #     "monitor": "metric_to_track",
-            #     "frequency": "indicates how often the metric is updated"
-            #     # If "monitor" references validation metrics, then "frequency" should be set to a
-            #     # multiple of "trainer.check_val_every_n_epoch".
-            # },
-        }
+        return optimizer
 
 
 
