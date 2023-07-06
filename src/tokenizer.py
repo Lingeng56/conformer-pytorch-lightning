@@ -31,6 +31,8 @@ class Tokenizer:
         for word in sentence:
             input_id = self.word2idx[word]
             result.append(input_id)
+            if len(result) == self.max_len - 1:
+                break
         result.append(self.word2idx['<EOS>'])
         result += ([-1] * self.max_len - len(result))
         return result
