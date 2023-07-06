@@ -35,6 +35,7 @@ class LSTMDecoder(nn.Module):
             sentence = sentence[:sentence.index(self.tokenizer.word2idx['<EOS>'])]
         if self.tokenizer.word2idx['<BOS>'] in sentence:
             sentence = sentence[sentence.index(self.tokenizer.word2idx['<BOS>']) + 1:]
+        sentence = [self.tokenizer.idx2word[t] for t in sentence]
         sentence = ' '.join(sentence)
         return sentence
 

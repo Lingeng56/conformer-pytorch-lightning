@@ -1,7 +1,7 @@
 export CUDA_VISIBLE_DEVICES="1"
 data_dir="data"
 vocab_path="vocab.txt"
-ckpt_path="experiments/conformer-small-lr1e-5-beam-v1"
+ckpt_path="experiments/conformer-small-lr5e-4-greedy-v1"
 
 mkdir -p ckpt_path
 
@@ -23,7 +23,7 @@ python src/main.py --max_epochs 1000 \
                    --decoder_layer_nums 1 \
                    --decoder_dim 320 \
                    --max_len 512 \
-                   --lr 1e-4 \
+                   --lr 5e-4 \
                    --checkpoint_path $ckpt_path \
                    --num_devices 1 \
                    --decode_method 'greedy' \
