@@ -47,7 +47,7 @@ class ASRModel(pl.LightningModule):
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         probs = self.decoder(outputs)
         loss = self.criterion(probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
-        self.log('training_loss', loss)
+        self.log('training_loss', loss, prog_bar=True, on_step=True)
         return loss
 
 
@@ -61,8 +61,8 @@ class ASRModel(pl.LightningModule):
         loss = self.criterion(probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         self.metric.update(preds, sentences)
 
-        self.log('val_loss', loss)
-        self.log('val_wer', self.metric)
+        self.log('val_loss', loss, prog_bar=True, on_step=True)
+        self.log('val_wer', self.metric, prog_bar=True, on_step=True)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         inputs, input_lengths = batch['inputs'], batch['input_lengths']
@@ -72,7 +72,7 @@ class ASRModel(pl.LightningModule):
 
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.encoder.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
         return optimizer
 
 

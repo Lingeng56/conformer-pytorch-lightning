@@ -11,8 +11,8 @@ python src/main.py --max_epochs 10 \
                    --train_url "train-clean-100" \
                    --test_url "test-clean" \
                    --vocab_path $vocab_path \
-                   --train_batch_size 4 \
-                   --eval_batch_size 4 \
+                   --train_batch_size 16 \
+                   --eval_batch_size 16 \
                    --input_dim 40 \
                    --kernel_size 31 \
                    --encoder_dim 144 \
@@ -23,7 +23,7 @@ python src/main.py --max_epochs 10 \
                    --decoder_layer_nums 1 \
                    --decoder_dim 320 \
                    --max_len 512 \
-                   --lr 1e-5 \
+                   --lr 1e-4 \
                    --checkpoint_path $ckpt_path \
                    --num_devices 1 \
                    --train

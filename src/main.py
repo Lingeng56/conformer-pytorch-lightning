@@ -9,6 +9,7 @@ from tokenizer import Tokenizer
 
 
 def train(args):
+    pl.seed_everything(3407)
     tokenizer = Tokenizer(args.vocab_path, args.max_len)
     train_dataset = CustomDataset(data_dir=args.train_data_dir, url=args.train_url, tokenizer=tokenizer)
     test_dataset = CustomDataset(data_dir=args.test_data_dir, url=args.test_url, tokenizer=tokenizer)

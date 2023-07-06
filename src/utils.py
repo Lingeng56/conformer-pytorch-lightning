@@ -9,7 +9,7 @@ def collate_fn(batch):
     sentences = []
     for wav, target, sentence in batch:
         wav_length = wav.shape[-1]
-        target_length = target.shape[0]
+        target_length = len([t for t in target if t != 0])
         targets.append(target.unsqueeze(0))
         sentences.append(sentence)
         wav_lengths.append(wav_length)
