@@ -1,6 +1,7 @@
 import torch
 from torchaudio.datasets import LIBRISPEECH
 from torch.utils.data import Dataset
+from torchaudio import transforms
 
 
 class CustomDataset(Dataset):
@@ -11,11 +12,16 @@ class CustomDataset(Dataset):
                                    url=url,
                                    download=True)
         self.tokenizer = tokenizer
+        self.mfcc_transform = transforms.MFCC(sample_rate=16000,
+                                              n_mfcc=13,
+                                              melkwargs={'n_fft': 400, 'hop_length': 160, 'n_mels': 23, 'center': False}
+                                              )
 
     def __getitem__(self, index):
         wav, _, sentence, _, _, _ = self.dataset[index]
         target = self.tokenizer(sentence)
-        return wav, torch.LongTensor(target), sentence
+        mfcc = self.mfcc_transform(wav)
+        return mfcc, torch.LongTensor(target), sentence
 
     def __len__(self):
         return len(self.dataset)
