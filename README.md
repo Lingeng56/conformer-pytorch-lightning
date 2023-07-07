@@ -41,4 +41,12 @@ so I just looked at the training log directly to get evaluation results.
 # Problems
 
 1. Num of model's parameters don't match with paper
+2. Model can't converge well...
 
+
+# TODO
+
+1. Finding bugs allows the model to train properly for convergence
+2. Finish inference script
+3. Reproduce the results in the paper, at least close
+4. Complete the ablation experiment in the paper
