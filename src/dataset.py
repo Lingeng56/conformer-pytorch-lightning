@@ -12,16 +12,24 @@ class CustomDataset(Dataset):
                                    url=url,
                                    download=True)
         self.tokenizer = tokenizer
-        self.mfcc_transform = transforms.MFCC(sample_rate=16000,
-                                              n_mfcc=40,
-                                              melkwargs={'n_fft': 400, 'hop_length': 160, 'n_mels': 40, 'center': False}
-                                              )
+
+        # Apply Mel filterbank transformation
+        self.fbank_transform = transforms.MelSpectrogram(
+            sample_rate=16000,
+            n_fft=400,  # Window size of 25ms (assuming sample_rate=16000)
+            hop_length=160,  # Stride of 10ms (assuming sample_rate=16000)
+            n_mels=80
+        )
 
     def __getitem__(self, index):
         wav, _, sentence, _, _, _ = self.dataset[index]
         target = self.tokenizer(sentence)
-        mfcc = self.mfcc_transform(wav)
-        return mfcc, torch.LongTensor(target), sentence
+        fbank = self.fbank_transform(wav)
+        fbank = transforms.AmplitudeToDB()(fbank)
+        mean_value = torch.mean(fbank)
+        std_value = torch.std(fbank)
+        fbank = (fbank - mean_value) / std_value
+        return fbank, torch.LongTensor(target), sentence
 
     def __len__(self):
         return len(self.dataset)

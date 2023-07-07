@@ -12,11 +12,8 @@ class Tokenizer:
             for line in f:
                 word = line.strip()
                 self.idx2word.append(word)
-        self.word2idx = {word: idx for idx, word in enumerate(self.idx2word)}
+        self.word2idx = {word: idx+1 for idx, word in enumerate(self.idx2word)}
         self.vocab_size = len(self.idx2word)
-        self.bos = self.word2idx['<BOS>']
-        self.eos = self.word2idx['<EOS>']
-
 
     def __call__(self, sentence):
         if isinstance(sentence, str):
@@ -26,15 +23,15 @@ class Tokenizer:
 
 
     def tokenize_single_sentence(self, sentence):
-        result = [self.word2idx['<BOS>']]
+        result = []
         sentence = sentence.split(' ')
         for word in sentence:
             input_id = self.word2idx[word]
             result.append(input_id)
             if len(result) == self.max_len - 1:
                 break
-        result.append(self.word2idx['<EOS>'])
-        result += [0] * (self.max_len - len(result))
+        if len(result) < self.max_len:
+            result += [0] * (self.max_len - len(result))
         return result
 
 

@@ -18,23 +18,24 @@ class LSTMDecoder(nn.Module):
         return probs
 
     def decode(self, encoder_outputs, output_lengths, method='greedy', beam_size=5):
-        assert method in ['greedy', 'beam']
-        if method == 'greedy':
-            sentences = self(encoder_outputs).argmax(dim=-1).tolist()
-            for idx, sentence in enumerate(sentences):
-                sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
-        else:
-            sentences = self.beam_search(encoder_outputs, output_lengths, beam_size, 0)
-            for idx, sentence in enumerate(sentences):
-                sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
-        return sentences
+        with torch.no_grad():
+            assert method in ['greedy', 'beam']
+            if method == 'greedy':
+                sentences = torch.unique_consecutive(self(encoder_outputs).argmax(dim=-1), dim=-1).tolist()
+                for idx, sentence in enumerate(sentences):
+                    sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
+            else:
+                sentences = self.beam_search(encoder_outputs, output_lengths, beam_size, 0)
+                for idx, sentence in enumerate(sentences):
+                    sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
+            return sentences
 
     def __clean_sentence(self, sentence, output_length):
-        sentence = sentence[:output_length]
-        if self.tokenizer.word2idx['<EOS>'] in sentence:
-            sentence = sentence[:sentence.index(self.tokenizer.word2idx['<EOS>'])]
-        if self.tokenizer.word2idx['<BOS>'] in sentence:
-            sentence = sentence[sentence.index(self.tokenizer.word2idx['<BOS>']) + 1:]
+        # sentence = sentence[:output_length]
+        # if self.tokenizer.word2idx['<EOS>'] in sentence:
+        #     sentence = sentence[:sentence.index(self.tokenizer.word2idx['<EOS>'])]
+        # if self.tokenizer.word2idx['<BOS>'] in sentence:
+        #     sentence = sentence[sentence.index(self.tokenizer.word2idx['<BOS>']) + 1:]
         sentence = [self.tokenizer.idx2word[t] for t in sentence]
         sentence = ' '.join(sentence)
         return sentence
@@ -43,7 +44,7 @@ class LSTMDecoder(nn.Module):
     def beam_search(self, encoder_outputs, output_lengths, beam_size, blank):
         probs = self(encoder_outputs)
         batch_size, seq_len, vocab_size = probs.size()
-        beam = [((self.tokenizer.bos, ), 0.0)]
+        beam = [((), 0.0)]
         sentences = []
         for idx, prob in enumerate(probs):
             for t in range(output_lengths[idx]):
