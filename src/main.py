@@ -33,7 +33,14 @@ def train(args):
                      max_len=args.max_len,
                      use_relative=args.use_relative,
                      decode_method=args.decode_method,
-                     beam_size=args.beam_size)
+                     beam_size=args.beam_size,
+                     join_dim=args.join_dim,
+                     predictor_embed_size=args.predictor_embed_size,
+                     predictor_hidden_size=args.predictor_hidden_size,
+                     predictor_output_size=args.predictor_output_size,
+                     predictor_embed_dropout=args.predictor_embed_dropout,
+                     predictor_num_layers=args.predictor_num_layers,
+                     )
 
     checkpoint_callback = ModelCheckpoint(
         monitor='val_wer',
@@ -94,7 +101,12 @@ if __name__ == '__main__':
     parser.add_argument('--num_heads', type=int, required=True, default=4)
     parser.add_argument('--encoder_layer_nums', type=int, required=True, default=4)
     parser.add_argument('--decoder_layer_nums', type=int, required=True, default=4)
-    parser.add_argument('--decoder_dim', type=int, required=True, default=32)
+    parser.add_argument('--predictor_embed_size', type=int, required=True, default=32)
+    parser.add_argument('--predictor_hidden_size', type=int, required=True, default=32)
+    parser.add_argument('--predictor_output_size', type=int, required=True, default=32)
+    parser.add_argument('--predictor_embed_dropout', type=int, required=True, default=32)
+    parser.add_argument('--predictor_num_layers', type=int, required=True, default=32)
+    parser.add_argument('--join_dim', type=int, required=True, default=32)
     parser.add_argument('--max_len', type=int, required=True, default=512)
     parser.add_argument('--use_relative', action='store_true')
     parser.add_argument('--checkpoint_path', type=str, required=True)

@@ -38,7 +38,7 @@ class Tokenizer:
             result.append(input_id)
             if len(result) == self.max_len - 1:
                 break
-        result.append(self.eos_id)
+
         if len(result) < self.max_len:
             result += [self.blank_id] * (self.max_len - len(result))
         return result

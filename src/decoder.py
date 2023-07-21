@@ -24,7 +24,15 @@ class LSTMAttentionDecoder(nn.Module):
         self.hidden_state_dim = hidden_state_dim
         self.decoder_layer_nums = decoder_layer_nums
         self.vocab_size = vocab_size
-        self.lstm = nn.LSTM(input_size=self.hidden_state_dim, hidden_size=self.hidden_state_dim, num_layers=self.decoder_layer_nums, batch_first=True, dropout=dropout, bias=True, bidirectional=False)
+        self.lstm = nn.LSTM(
+            input_size=self.hidden_state_dim,
+            hidden_size=self.hidden_state_dim,
+            num_layers=self.decoder_layer_nums,
+            batch_first=True,
+            dropout=dropout,
+            bias=True,
+            bidirectional=False
+                            )
         self.fc = nn.Sequential(
             nn.Linear(self.hidden_state_dim << 1, self.hidden_state_dim),
             nn.Tanh(),
@@ -32,8 +40,11 @@ class LSTMAttentionDecoder(nn.Module):
             nn.Linear(self.hidden_state_dim, self.vocab_size)
         )
         self.dropout = nn.Dropout(dropout)
-        self.embedding = nn.Embedding(self.vocab_size, self.hidden_state_dim)
-        self.attention = nn.MultiheadAttention(self.hidden_state_dim, num_heads, batch_first=True)
+        self.embedding = nn.Embedding(self.vocab_size,
+                                      self.hidden_state_dim)
+        self.attention = nn.MultiheadAttention(self.hidden_state_dim,
+                                               num_heads,
+                                               batch_first=True)
         self.softmax = nn.LogSoftmax(dim=-1)
 
 
@@ -78,6 +89,8 @@ class LSTMAttentionDecoder(nn.Module):
         logits = torch.stack(logits, dim=1)
 
         return logits
+
+
 
     def validate_args(self, encoder_outputs, targets=None):
         batch_size = encoder_outputs.size(0)
