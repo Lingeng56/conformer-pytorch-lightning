@@ -1,18 +1,19 @@
 import argparse
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
+from pytorch_lightning.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar, LearningRateMonitor
 from model import ASRModel
 from dataset import CustomDataset
 from torch.utils.data import DataLoader
 from utils import collate_fn
 from tokenizer import Tokenizer
+from pytorch_lightning.loggers import WandbLogger
 
 
 def train(args):
     pl.seed_everything(3407)
-    tokenizer = Tokenizer(args.bpe_path, args.vocab_path, args.max_len)
-    train_dataset = CustomDataset(data_list_path=args.train_data_list_path, tokenizer=tokenizer)
-    test_dataset = CustomDataset(data_list_path=args.dev_data_list_path, tokenizer=tokenizer)
+    tokenizer = Tokenizer(args.vocab_path, args.max_len)
+    train_dataset = CustomDataset(data_dir=args.train_data_dir, url=args.train_url, tokenizer=tokenizer)
+    test_dataset = CustomDataset(data_dir=args.test_data_dir, url=args.test_url, tokenizer=tokenizer)
     train_dataloader = DataLoader(train_dataset,
                                   batch_size=args.train_batch_size,
                                   shuffle=True,
@@ -28,6 +29,7 @@ def train(args):
                      num_heads=args.num_heads,
                      encoder_layer_nums=args.encoder_layer_nums,
                      decoder_layer_nums=args.decoder_layer_nums,
+                     decoder_dim=args.decoder_dim,
                      vocab_size=tokenizer.vocab_size,
                      tokenizer=tokenizer,
                      max_len=args.max_len,
@@ -38,27 +40,31 @@ def train(args):
     checkpoint_callback = ModelCheckpoint(
         monitor='val_wer',
         dirpath=args.checkpoint_path,
-        filename='{epoch}-{val_total_loss:.2f}-{val_wer:.2f}',
+        filename='{epoch}-{val_loss:.2f}-{val_wer:.2f}',
         save_last=True,
         save_top_k=5,
         mode='min',
     )
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+
+    wandb_logger = WandbLogger(project="Conformer")
 
     trainer = pl.Trainer(
         devices=args.num_devices,
         accelerator='gpu',
         callbacks=[checkpoint_callback,
                    RichModelSummary(),
-                   RichProgressBar()],
+                   RichProgressBar(),
+                   lr_monitor],
         check_val_every_n_epoch=1,
         max_epochs=args.max_epochs,
         precision=32,
         enable_progress_bar=True,
+        logger=wandb_logger
     )
     trainer.fit(model=model,
                 train_dataloaders=train_dataloader,
-                val_dataloaders=test_dataloader,
-                ckpt_path=args.resume_from if args.resume else None)
+                val_dataloaders=test_dataloader)
 
 
 
@@ -79,11 +85,11 @@ if __name__ == '__main__':
         prog='Conformer-Pytorch-Lightning',
         description='Pytorch-Lightning Implementation of Conformer')
     parser.add_argument('--max_epochs', type=int, required=True, default=10)
-    parser.add_argument('--train_data_list_path', type=str, required=True)
-    parser.add_argument('--dev_data_list_path', type=str, required=True)
-    parser.add_argument('--test_data_list_path', type=str, required=True)
+    parser.add_argument('--train_data_dir', type=str, required=True)
+    parser.add_argument('--train_url', type=str, required=True)
+    parser.add_argument('--test_data_dir', type=str, required=True)
+    parser.add_argument('--test_url', type=str, required=True)
     parser.add_argument('--vocab_path', type=str, required=True)
-    parser.add_argument('--bpe_path', type=str, required=True)
     parser.add_argument('--train_batch_size', type=int, required=True, default=32)
     parser.add_argument('--eval_batch_size', type=int, required=True, default=32)
     parser.add_argument('--input_dim', type=int, required=True, default=256)
@@ -103,7 +109,5 @@ if __name__ == '__main__':
     parser.add_argument('--beam_size', type=int, default=5)
     parser.add_argument('--train', action='store_true')
     parser.add_argument('--eval', action='store_true')
-    parser.add_argument('--resume', action='store_true')
-    parser.add_argument('--resume_from', type=str)
     all_args = parser.parse_args()
     main(all_args)

@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 
 
@@ -32,21 +33,47 @@ class ConvolutionModule(nn.Module):
         return outputs
 
 
+class MaskConv2d(nn.Module):
+
+    def __init__(self, module):
+        super(MaskConv2d, self).__init__()
+        self.module = module
+
+
+    def forward(self, inputs, seq_lengths):
+        numerator = seq_lengths + 2 * self.module.padding[1] - self.module.dilation[1] * (
+                self.module.kernel_size[1] - 1) - 1
+        seq_lengths = numerator.float() / float(self.module.stride[1])
+        seq_lengths = (seq_lengths.int() + 1).int()
+        outputs = self.module(inputs)
+        mask = torch.BoolTensor(outputs.size()).fill_(0).to(outputs.device)
+        for idx, length in enumerate(seq_lengths):
+            length = length.item()
+
+            if mask[idx].size(2) - length > 0:
+                mask[idx].narrow(dim=2, start=length, length=mask[idx].size(2) - length).fill_(1)
+
+        outputs = outputs.masked_fill(mask, 0)
+        return outputs, seq_lengths
+
+
+
+
 class ConvolutionSubSampling(nn.Module):
 
     def __init__(self, in_channels, out_channels):
         super(ConvolutionSubSampling, self).__init__()
-        self.conv_one = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2)
+        self.conv_one = MaskConv2d(nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=2))
         self.relu_one = nn.ReLU()
-        self.conv_two = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2)
+        self.conv_two = MaskConv2d(nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2))
         self.relu_two = nn.ReLU()
 
+
     def forward(self, inputs, input_lengths):
-        outputs = self.conv_one(inputs.unsqueeze(1))
+        outputs, output_lengths = self.conv_one(inputs.unsqueeze(1), input_lengths)
         outputs = self.relu_one(outputs)
-        outputs = self.conv_two(outputs)
+        outputs, output_lengths = self.conv_two(outputs, output_lengths)
         outputs = self.relu_two(outputs)
         batch_size, channels, seq_len, feature_dim = outputs.size()
         outputs = outputs.permute(0, 2, 1, 3).contiguous().view(batch_size, seq_len, feature_dim * channels)
-        output_lengths = input_lengths >> 2 + 1
         return outputs, output_lengths

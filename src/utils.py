@@ -21,14 +21,11 @@ def collate_fn(batch):
         wav = torch.nn.functional.pad(wav, (0, wav_max_length - wav.shape[-1]))
         wavs.append(wav)
 
-
     # convert data into tensor
     wavs = torch.concat(wavs, dim=0).permute(0, 2, 1)
     targets = torch.concat(targets, dim=0)
     wav_lengths = torch.LongTensor(wav_lengths)
     target_lengths = torch.LongTensor(target_lengths)
-
-
 
     return {
         'inputs': wavs,
@@ -37,3 +34,15 @@ def collate_fn(batch):
         'target_lengths': target_lengths,
         'sentences': sentences
     }
+
+
+def remove_duplicates_and_blank(hyp):
+    new_hyp = []
+    cur = 0
+    while cur < len(hyp):
+        if hyp[cur] != 0:
+            new_hyp.append(hyp[cur])
+        prev = cur
+        while cur < len(hyp) and hyp[cur] == hyp[prev]:
+            cur += 1
+    return new_hyp

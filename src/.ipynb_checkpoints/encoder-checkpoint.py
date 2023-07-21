@@ -39,5 +39,5 @@ class ConformerEncoder(nn.Module):
         outputs = self.fc(outputs)
         outputs = self.dropout(outputs)
         for block in self.conformer_blocks:
-            outputs = block(outputs, output_lengths)
+            outputs = block(outputs)
         return outputs, output_lengths

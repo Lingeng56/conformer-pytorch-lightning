@@ -2,6 +2,13 @@
 <project version="4">
   <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
     <serverData>
+      <paths name="wuliu@server.demo.dengfeng.fun:18183">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/wuliu/workspace/conformer-pytorch-lightning" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
       <paths name="ywh@222.28.84.20:22 password">
         <serverdata>
           <mappings>

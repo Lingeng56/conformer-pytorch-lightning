@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from feedforward import FeedForwardModule
 from attention import RelativeMultiHeadSelfAttentionModule, MultiHeadSelfAttentionModule
@@ -35,9 +34,9 @@ class ConformerBlock(nn.Module):
 
         self.layer_norm = nn.LayerNorm(encoder_dim)
 
-    def forward(self, inputs, input_lengths):
+    def forward(self, inputs):
         outputs = self.feed_forward_one(inputs)
-        outputs = self.attention(outputs, input_lengths)
+        outputs = self.attention(outputs)
         outputs = self.conv(outputs)
         outputs = self.feed_forward_two(outputs)
         outputs = self.layer_norm(outputs)

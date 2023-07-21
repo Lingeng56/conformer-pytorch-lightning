@@ -164,14 +164,11 @@ class MultiHeadSelfAttentionModule(nn.Module):
         self.w_value = nn.Linear(encoder_dim, encoder_dim)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, inputs, input_lengths):
-        max_length = input_lengths.max().item()
-        key_padding_mask = torch.arange(max_length, device=input_lengths.device).expand(len(input_lengths), max_length) >= input_lengths.unsqueeze(1)
+    def forward(self, inputs):
         keys = self.w_key(inputs)
         queries = self.w_query(inputs)
         values = self.w_value(inputs)
-        attn_output, _ = self.attention(keys, queries, values, key_padding_mask)
-        attn_output = self.dropout(attn_output)
+        attn_output, _ = self.attention(keys, queries, values)
         attn_output = self.dropout(attn_output)
         attn_output = inputs + attn_output
         return attn_output
