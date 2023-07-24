@@ -1,6 +1,5 @@
 import torch.nn as nn
 import torch
-from utils import remove_duplicates_and_blank
 
 
 class View(nn.Module):
@@ -17,9 +16,8 @@ class View(nn.Module):
 
 class LSTMAttentionDecoder(nn.Module):
 
-    def __init__(self, hidden_state_dim, decoder_layer_nums, num_heads, dropout, vocab_size, tokenizer, max_len):
+    def __init__(self, hidden_state_dim, decoder_layer_nums, num_heads, dropout, vocab_size, max_len):
         super(LSTMAttentionDecoder, self).__init__()
-        self.tokenizer = tokenizer
         self.max_len = max_len
         self.hidden_state_dim = hidden_state_dim
         self.decoder_layer_nums = decoder_layer_nums
@@ -96,7 +94,7 @@ class LSTMAttentionDecoder(nn.Module):
         batch_size = encoder_outputs.size(0)
 
         if targets is None:
-            targets = torch.LongTensor([self.tokenizer.bos_id] * batch_size).view(batch_size, 1).to(encoder_outputs.device)
+            targets = torch.LongTensor(['<bos>'] * batch_size).view(batch_size, 1).to(encoder_outputs.device)
             max_length = self.max_len
 
         else:
@@ -104,67 +102,4 @@ class LSTMAttentionDecoder(nn.Module):
 
         return targets, batch_size, max_length
 
-
-
-
-    def decode(self, probs, output_lengths, method='greedy', beam_size=5):
-        with torch.no_grad():
-            assert method in ['greedy', 'beam']
-            if method == 'greedy':
-                sentences = torch.unique_consecutive(probs.argmax(dim=-1), dim=-1).tolist()
-                for idx, sentence in enumerate(sentences):
-                    sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
-            else:
-                sentences = self.beam_search(probs, output_lengths, beam_size, 0)
-                for idx, sentence in enumerate(sentences):
-                    sentences[idx] = self.__clean_sentence(sentence, output_lengths[idx])
-            return sentences
-
-
-    def __clean_sentence(self, sentence, output_length):
-        # sentence = sentence[:output_length]
-        # if self.tokenizer.word2idx['<EOS>'] in sentence:
-        #     sentence = sentence[:sentence.index(self.tokenizer.word2idx['<EOS>'])]
-        # if self.tokenizer.word2idx['<BOS>'] in sentence:
-        #     sentence = sentence[sentence.index(self.tokenizer.word2idx['<BOS>']) + 1:]
-        sentence = remove_duplicates_and_blank(sentence)
-        sentence = sentence[:sentence.index(self.tokenizer.eos_id) if self.tokenizer.eos_id in sentence else None]
-        sentence = [self.tokenizer.idx2word[t] for t in sentence]
-        sentence = self.tokenizer.bpe_model.decode(sentence)
-        return sentence
-
-
-    def beam_search(self, encoder_outputs, output_lengths, beam_size, blank):
-        probs = self(encoder_outputs)
-        batch_size, seq_len, vocab_size = probs.size()
-        beam = [((), 0.0)]
-        sentences = []
-        for idx, prob in enumerate(probs):
-            for t in range(output_lengths[idx]):
-                candidates = []
-                for seq, score in beam:
-                    if len(seq) > 0 and seq[-1] == blank:
-                        candidate = (seq, score + torch.log(prob[t, blank]))
-                        candidates.append(candidate)
-
-                    for vocab_idx in range(vocab_size):
-                        if len(seq) == 0 or vocab_idx != seq[-1]:
-                            candidate = (seq + (vocab_idx, ), score + torch.log(prob[t, vocab_idx]))
-                            candidates.append(candidate)
-
-                candidates = sorted(candidates, key=lambda x: x[1], reverse=True)[:beam_size]
-                beam = []
-
-                for seq, score in candidates:
-                    if seq not in [s for s, _ in beam]:
-                        beam.append((seq, score))
-
-
-                total_score = sum([torch.exp(score) for _, score in beam])
-                beam = [(seq, score - torch.log(total_score)) for seq, score in beam]
-
-            best_seq, best_score = max(beam, key=lambda x: x[1])
-            sentences.append(best_seq)
-
-        return sentences
 

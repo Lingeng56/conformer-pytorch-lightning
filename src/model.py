@@ -7,7 +7,7 @@ from torchmetrics import WordErrorRate
 from scheduler import TransformerLR
 from joint import TransducerJoint
 from predictor import Predictor
-from torchaudio.functional import rnnt_loss
+from k2 import rnnt_loss
 from utils import build_joint_text
 
 
@@ -24,15 +24,12 @@ class ASRModel(pl.LightningModule):
                  encoder_layer_nums,
                  decoder_layer_nums,
                  vocab_size,
-                 tokenizer,
                  max_len,
-                 decode_method,
                  predictor_embed_size,
                  predictor_hidden_size,
                  predictor_output_size,
                  predictor_embed_dropout,
                  predictor_num_layers,
-                 beam_size=-1,
                  use_relative=False):
         super(ASRModel, self).__init__()
         self.encoder_dim = encoder_dim
@@ -48,7 +45,7 @@ class ASRModel(pl.LightningModule):
                                         use_relative
                                         )
         self.attn_decoder = LSTMAttentionDecoder(encoder_dim, decoder_layer_nums, num_heads, dropout, vocab_size,
-                                                 tokenizer, max_len)
+                                                 max_len)
         self.ctc_decoder = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(encoder_dim, vocab_size),
@@ -69,14 +66,8 @@ class ASRModel(pl.LightningModule):
             pred_output_size=predictor_output_size,
             join_dim=join_dim
         )
-        self.encoder_criterion = nn.CTCLoss(blank=0, zero_infinity=False)
-        self.decoder_criterion = nn.CrossEntropyLoss(ignore_index=0)
-        self.train_metric = WordErrorRate()
-        self.valid_metric = WordErrorRate()
-        self.decode_method = decode_method
-        self.beam_size = beam_size
-        self.valid_step_preds = []
-        self.valid_step_targets = []
+        self.encoder_criterion = nn.CTCLoss(blank=0, zero_infinity=False, reduction='sum')
+        self.decoder_criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
 
     def training_step(self, batch, batch_idx):
         inputs, input_lengths, targets, target_lengths, sentences = batch['inputs'], batch['input_lengths'], batch[
@@ -87,28 +78,18 @@ class ASRModel(pl.LightningModule):
         joint_text = build_joint_text(targets, 0)
         predictor_out = self.predictor(joint_text)
         joint_out = self.joint_network(outputs, predictor_out)
-        rnnt_loss_ = rnnt_loss(joint_out,
-                               targets,
-                               output_lengths,
-                               target_lengths,
-                               blank=0,
-                               reduction='mean')
-        preds = self.attn_decoder.decode(outputs, output_lengths, self.decode_method, self.beam_size)
+        rnnt_loss_ = rnnt_loss(logits=joint_out,
+                               symbols=targets,
+                               termination_symbol=0,
+                               reduction="mean")
         ctc_loss = self.encoder_criterion(ctc_probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         ce_loss = self.decoder_criterion(attn_probs.view(-1, attn_probs.shape[-1]), targets.view(-1))
-        loss = 0.5 * ctc_loss + 0.5 * ce_loss + rnnt_loss_
-        self.train_metric.update(preds, sentences)
-        wer = self.train_metric.compute()
+        loss = 0.1 * ctc_loss + 0.15 * ce_loss + 0.75 * rnnt_loss_
         self.log('train_total_loss', loss, prog_bar=True, on_step=True)
         self.log('train_ctc_loss', ctc_loss, prog_bar=True, on_step=True)
         self.log('train_ce_loss', ce_loss, prog_bar=True, on_step=True)
         self.log('train_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True)
-        self.log('training_wer', wer, prog_bar=True, on_step=True)
         self.log('current_lr', self.optimizers().param_groups[0]['lr'], prog_bar=True, on_step=True)
-
-        if self.global_step % 100 == 0 and self.global_rank == 0:
-            print('Preds: %s' % preds[0])
-            print('Truth: %s' % sentences[0])
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -122,40 +103,19 @@ class ASRModel(pl.LightningModule):
         joint_text = build_joint_text(targets, 0)
         predictor_out = self.predictor(joint_text)
         joint_out = self.joint_network(outputs, predictor_out)
-        rnnt_loss_ = rnnt_loss(joint_out,
-                               targets,
-                               output_lengths,
-                               target_lengths,
-                               blank=0,
-                               reduction='mean')
-        preds = self.attn_decoder.decode(outputs, output_lengths, self.decode_method, self.beam_size)
+        rnnt_loss_ = rnnt_loss(logits=joint_out,
+                               symbols=targets,
+                               termination_symbol=0,
+                               reduction="mean")
         ctc_loss = self.encoder_criterion(ctc_probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
         ce_loss = self.decoder_criterion(attn_probs.view(-1, attn_probs.shape[-1]), targets.view(-1))
-        loss = 0.5 * ctc_loss + 0.5 * ce_loss
-        self.valid_metric.update(preds, sentences)
+        loss = 0.1 * ctc_loss + 0.15 * ce_loss + 0.75 * rnnt_loss_
         self.log('val_total_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log('val_ctc_loss', ctc_loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log('val_ce_loss', ce_loss, prog_bar=True, on_step=True, on_epoch=True)
         self.log('val_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True, on_epoch=True)
-        self.log('val_wer', self.valid_metric, prog_bar=True, on_step=True, on_epoch=True)
 
-        self.valid_step_preds.extend(preds)
 
-        self.valid_step_targets.extend(sentences)
-
-    def on_validation_epoch_end(self):
-        with open('tmp-predictions.txt', 'w') as f:
-            for pred, target in zip(self.valid_step_preds, self.valid_step_targets):
-                f.write('%s\t%s\n' % (pred, target))
-
-        self.valid_step_preds = []
-        self.valid_step_targets = []
-
-    # def predict_step(self, batch, batch_idx, dataloader_idx=0):
-    #     inputs, input_lengths = batch['inputs'], batch['input_lengths']
-    #     outputs, output_lengths = self.encoder(inputs, input_lengths, self.decode_method, self.beam_size)
-    #     preds = self.decoder.decode(outputs, output_lengths)
-    #     return preds
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, betas=(0.9, 0.98), eps=1e-9, weight_decay=1e-6)
