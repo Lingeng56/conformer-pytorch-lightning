@@ -56,6 +56,7 @@ class ASRModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         inputs, input_lengths, targets, target_lengths, sentences = batch['inputs'], batch['input_lengths'], batch[
             'targets'], batch['target_lengths'], batch['sentences']
+        import pdb;pdb.set_trace()
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         ctc_probs = self.ctc_decoder(outputs)
         attn_probs = self.attn_decoder(outputs)

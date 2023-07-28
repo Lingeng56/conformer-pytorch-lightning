@@ -33,5 +33,5 @@ python src/main.py --max_epochs 1000 \
                    --decode_method 'greedy' \
                    --beam_size 2 \
                    --train \
-                   --resume \
-                   --resume_from $ckpt_path/$resume_checkpoint
+#                   --resume \
+#                   --resume_from $ckpt_path/$resume_checkpoint
