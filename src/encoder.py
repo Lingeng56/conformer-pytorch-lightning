@@ -12,7 +12,7 @@ class ConformerEncoder(nn.Module):
                  kernel_size,
                  encoder_dim,
                  dropout,
-                 expansion_factor,
+                 linear_dim,
                  num_heads,
                  encoder_layer_nums,
                  max_len=5000,
@@ -22,6 +22,7 @@ class ConformerEncoder(nn.Module):
             self.position_encoding = RelativePositionalEncoding(encoder_dim, dropout, max_len)
         else:
             self.position_encoding = PositionalEncoding(encoder_dim, dropout, max_len)
+
         self.subsampling = ConvolutionSubSampling(in_channels=1, out_channels=encoder_dim)
         self.fc = nn.Linear(encoder_dim * (((input_dim - 1) // 2 - 1) // 2), encoder_dim)
         self.dropout = nn.Dropout(dropout)
@@ -30,20 +31,12 @@ class ConformerEncoder(nn.Module):
                 ConformerBlock(encoder_dim,
                                kernel_size,
                                dropout,
-                               expansion_factor,
+                               linear_dim,
                                num_heads,
                                use_relative)
                 for _ in range(encoder_layer_nums)
             ]
         )
-        # self.conformer_blocks = Conformer(
-        #     encoder_dim,
-        #     num_heads,
-        #     expansion_factor * encoder_dim,
-        #     encoder_layer_nums,
-        #     kernel_size,
-        #     dropout,
-        # )
 
         self.criterion = nn.CTCLoss()
 

@@ -14,6 +14,23 @@ class View(nn.Module):
         return inputs.view(self.shape).contiguous() if self.contiguous else inputs.view(self.shape)
 
 
+class CTCLSTMDecoder(nn.Module):
+
+    def __init__(self, encoder_dim, hidden_size, num_decoder_layers, dropout, vocab_size):
+        super(CTCLSTMDecoder, self).__init__()
+        self.lstm = nn.LSTM(input_size=encoder_dim, hidden_size=hidden_size, batch_first=True, num_layers=num_decoder_layers)
+        self.dropout = nn.Dropout(dropout)
+        self.proj = nn.Linear(hidden_size, vocab_size)
+        self.softmax = nn.LogSoftmax(dim=-1)
+
+    def forward(self, inputs):
+        outputs, _ = self.lstm(inputs)
+        outputs = self.dropout(outputs)
+        outputs = self.proj(outputs)
+        outputs = self.softmax(outputs)
+        return outputs
+
+
 class LSTMAttentionDecoder(nn.Module):
 
     def __init__(self, hidden_state_dim, decoder_layer_nums, num_heads, dropout, vocab_size, max_len):

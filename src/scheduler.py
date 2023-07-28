@@ -1,17 +1,52 @@
 from torch.optim.lr_scheduler import _LRScheduler
 
 
-class TransformerLR(_LRScheduler):
+class WarmupLR(_LRScheduler):
+    """The WarmupLR scheduler
 
-    def __init__(self, optimizer, peak_lr, warmup, last_epoch=-1, verbose=False):
-        self.peak_lr = peak_lr
-        self.warmup = warmup
-        super().__init__(optimizer, last_epoch, verbose)
+    This scheduler is almost same as NoamLR Scheduler except for following
+    difference:
+
+    NoamLR:
+        lr = optimizer.lr * model_size ** -0.5
+             * min(step ** -0.5, step * warmup_step ** -1.5)
+    WarmupLR:
+        lr = optimizer.lr * warmup_step ** 0.5
+             * min(step ** -0.5, step * warmup_step ** -1.5)
+
+    Note that the maximum lr equals to optimizer.lr in this scheduler.
+
+    """
+
+    def __init__(
+            self,
+            optimizer,
+            warmup_steps = 25000,
+            last_epoch: int = -1,
+    ):
+        self.warmup_steps = warmup_steps
+
+        # __init__() must be invoked before setting field
+        # because step() is also invoked in __init__()
+        super().__init__(optimizer, last_epoch)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(warmup_steps={self.warmup_steps})"
 
     def get_lr(self):
-        if self._step_count == 0:
-            curr_lr = 0.0
+        step_num = self.last_epoch + 1
+        if self.warmup_steps == 0:
+            return [
+                lr * step_num ** -0.5
+                for lr in self.base_lrs
+            ]
         else:
-            curr_lr = self._step_count * self.peak_lr / self.warmup
-        values = [curr_lr for _ in self.optimizer.param_groups]
-        return values
+            return [
+                lr
+                * self.warmup_steps ** 0.5
+                * min(step_num ** -0.5, step_num * self.warmup_steps ** -1.5)
+                for lr in self.base_lrs
+            ]
+
+    def set_step(self, step: int):
+        self.last_epoch = step

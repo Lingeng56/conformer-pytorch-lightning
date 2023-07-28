@@ -36,6 +36,7 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         self.pos_bias_u = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.pos_bias_v = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
 
         nn.init.xavier_uniform_(self.pos_bias_u)
         nn.init.xavier_uniform_(self.pos_bias_v)
@@ -43,6 +44,7 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
 
     def forward(self, inputs, pos_embed):
         batch_size = inputs.size(0)
+        inputs = self.layer_norm(inputs)
         q = self.w_query(inputs).view(batch_size, -1, self.num_heads, self.d_k)
         k = self.w_key(inputs).view(batch_size, -1, self.num_heads, self.d_k)
         v = self.w_value(inputs).view(batch_size, -1, self.num_heads, self.d_k)
@@ -102,11 +104,13 @@ class MultiHeadSelfAttentionModule(nn.Module):
         self.w_value = nn.Linear(encoder_dim, encoder_dim)
         self.projection = nn.Linear(encoder_dim, encoder_dim)
         self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
 
     def forward(self,
                 inputs,
                 pos_embed):
         batch_size = inputs.size(0)
+        inputs = self.layer_norm(inputs)
         q = self.w_query(inputs).view(batch_size, -1, self.num_heads, self.d_k)
         k = self.w_key(inputs).view(batch_size, -1, self.num_heads, self.d_k)
         v = self.w_value(inputs).view(batch_size, -1, self.num_heads, self.d_k)

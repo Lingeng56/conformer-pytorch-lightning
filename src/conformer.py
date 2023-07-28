@@ -31,7 +31,7 @@ class ConformerBlock(nn.Module):
                                                   dropout,
                                                   expansion_factor)
 
-        self.layer_norm = nn.LayerNorm(encoder_dim)
+        self.layer_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
 
     def forward(self, inputs, input_lengths, pos_embed):
         outputs = self.feed_forward_one(inputs)

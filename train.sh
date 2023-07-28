@@ -30,7 +30,7 @@ python src/main.py --max_epochs 1000 \
                    --predictor_embed_dropout 0.1 \
                    --predictor_num_layers 2 \
                    --join_dim 512 \
-                   --lr 0.001 \
+                   --lr 1e-5 \
                    --warmup 25000 \
                    --accumulate_batches 4 \
                    --resume_from $ckpt_path/$resume_checkpoint \
