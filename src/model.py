@@ -7,8 +7,9 @@ from torchmetrics import WordErrorRate
 from scheduler import TransformerLR
 from joint import TransducerJoint
 from predictor import Predictor
-from k2 import rnnt_loss
+from torchaudio.functional import rnnt_loss
 from utils import build_joint_text
+from cmvn import GlobalCMVN
 
 
 class ASRModel(pl.LightningModule):
@@ -24,16 +25,19 @@ class ASRModel(pl.LightningModule):
                  encoder_layer_nums,
                  decoder_layer_nums,
                  vocab_size,
-                 max_len,
+                 target_max_len,
                  predictor_embed_size,
                  predictor_hidden_size,
                  predictor_output_size,
                  predictor_embed_dropout,
+                 lr,
+                 warmup,
                  predictor_num_layers,
                  use_relative=False):
         super(ASRModel, self).__init__()
         self.encoder_dim = encoder_dim
-        self.lr = 0.05 / (self.encoder_dim ** 0.5)
+        self.lr = lr
+        self.warmup = warmup
         self.encoder = ConformerEncoder(input_dim,
                                         kernel_size,
                                         encoder_dim,
@@ -41,11 +45,10 @@ class ASRModel(pl.LightningModule):
                                         expansion_factor,
                                         num_heads,
                                         encoder_layer_nums,
-                                        max_len,
-                                        use_relative
+                                        use_relative=use_relative
                                         )
         self.attn_decoder = LSTMAttentionDecoder(encoder_dim, decoder_layer_nums, num_heads, dropout, vocab_size,
-                                                 max_len)
+                                                 target_max_len)
         self.ctc_decoder = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(encoder_dim, vocab_size),
@@ -70,32 +73,31 @@ class ASRModel(pl.LightningModule):
         self.decoder_criterion = nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
 
     def training_step(self, batch, batch_idx):
-        inputs, input_lengths, targets, target_lengths, sentences = batch['inputs'], batch['input_lengths'], batch[
-            'targets'], batch['target_lengths'], batch['sentences']
+        _, inputs, input_lengths, targets, target_lengths, sentences = batch
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         ctc_probs = self.ctc_decoder(outputs)
         attn_probs = self.attn_decoder(outputs)
         joint_text = build_joint_text(targets, 0)
         predictor_out = self.predictor(joint_text)
         joint_out = self.joint_network(outputs, predictor_out)
-        rnnt_loss_ = rnnt_loss(logits=joint_out,
-                               symbols=targets,
-                               termination_symbol=0,
+        rnnt_loss_ = rnnt_loss(joint_out,
+                               targets.to(torch.int32),
+                               output_lengths.to(torch.int32),
+                               target_lengths.to(torch.int32),
+                               blank=0,
                                reduction="mean")
         ctc_loss = self.encoder_criterion(ctc_probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
-        ce_loss = self.decoder_criterion(attn_probs.view(-1, attn_probs.shape[-1]), targets.view(-1))
+        ce_loss = self.decoder_criterion(attn_probs[:, :targets.shape[1], :].reshape(-1, attn_probs.shape[-1]),
+                                         targets.reshape(-1))
         loss = 0.1 * ctc_loss + 0.15 * ce_loss + 0.75 * rnnt_loss_
-        self.log('train_total_loss', loss, prog_bar=True, on_step=True)
-        self.log('train_ctc_loss', ctc_loss, prog_bar=True, on_step=True)
-        self.log('train_ce_loss', ce_loss, prog_bar=True, on_step=True)
-        self.log('train_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True)
-        self.log('current_lr', self.optimizers().param_groups[0]['lr'], prog_bar=True, on_step=True)
-        return loss
+        self.log('train_total_loss', loss, prog_bar=True, on_step=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('train_ctc_loss', ctc_loss, prog_bar=True, on_step=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('train_ce_loss', ce_loss, prog_bar=True, on_step=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('train_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True, batch_size=inputs.shape[0], sync_dist=True)
+        return rnnt_loss_
 
     def validation_step(self, batch, batch_idx):
-        inputs, input_lengths, targets, target_lengths, sentences = batch['inputs'], batch['input_lengths'], batch[
-            'targets'], \
-                                                                    batch['target_lengths'], batch['sentences']
+        _, inputs, input_lengths, targets, target_lengths, sentences = batch
 
         outputs, output_lengths = self.encoder(inputs, input_lengths)
         ctc_probs = self.ctc_decoder(outputs)
@@ -103,27 +105,28 @@ class ASRModel(pl.LightningModule):
         joint_text = build_joint_text(targets, 0)
         predictor_out = self.predictor(joint_text)
         joint_out = self.joint_network(outputs, predictor_out)
-        rnnt_loss_ = rnnt_loss(logits=joint_out,
-                               symbols=targets,
-                               termination_symbol=0,
+        rnnt_loss_ = rnnt_loss(joint_out,
+                               targets.to(torch.int32),
+                               output_lengths.to(torch.int32),
+                               target_lengths.to(torch.int32),
+                               blank=0,
                                reduction="mean")
         ctc_loss = self.encoder_criterion(ctc_probs.permute(1, 0, 2), targets, output_lengths, target_lengths)
-        ce_loss = self.decoder_criterion(attn_probs.view(-1, attn_probs.shape[-1]), targets.view(-1))
+        ce_loss = self.decoder_criterion(attn_probs[:, :targets.shape[1], :].reshape(-1, attn_probs.shape[-1]),
+                                         targets.reshape(-1))
         loss = 0.1 * ctc_loss + 0.15 * ce_loss + 0.75 * rnnt_loss_
-        self.log('val_total_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log('val_ctc_loss', ctc_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log('val_ce_loss', ce_loss, prog_bar=True, on_step=True, on_epoch=True)
-        self.log('val_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True, on_epoch=True)
-
-
+        self.log('val_total_loss', loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('val_ctc_loss', ctc_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('val_ce_loss', ce_loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=inputs.shape[0], sync_dist=True)
+        self.log('val_rnnt_loss', rnnt_loss_, prog_bar=True, on_step=True, on_epoch=True, batch_size=inputs.shape[0], sync_dist=True)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr, betas=(0.9, 0.98), eps=1e-9, weight_decay=1e-6)
-        noam_sched = TransformerLR(optimizer, self.encoder_dim, 10000, 5)
+        warmup_sched = TransformerLR(optimizer, self.lr, self.warmup)
         config = {
             "optimizer": optimizer,
             "lr_scheduler": {
-                "scheduler": noam_sched,
+                "scheduler": warmup_sched,
                 "interval": "step"
             }
         }

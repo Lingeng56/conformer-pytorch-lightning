@@ -94,7 +94,7 @@ class LSTMAttentionDecoder(nn.Module):
         batch_size = encoder_outputs.size(0)
 
         if targets is None:
-            targets = torch.LongTensor(['<bos>'] * batch_size).view(batch_size, 1).to(encoder_outputs.device)
+            targets = torch.LongTensor([2] * batch_size).view(batch_size, 1).to(encoder_outputs.device)
             max_length = self.max_len
 
         else:

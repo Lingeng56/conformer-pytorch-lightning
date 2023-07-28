@@ -1,78 +1,74 @@
 import torchaudio
-import kaldi
+import torchaudio.compliance.kaldi as kaldi
 import torch
 import random
 import re
 from torch.nn.utils.rnn import pad_sequence
 
 
-def parse_raw(data):
-    for sample in data:
-        key = sample['key']
-        wav_file = sample['wav_path']
-        transcript = sample['transcript']
-        waveform, sample_rate = torchaudio.load(wav_file)
-        example = dict(
-            key=key,
-            transcript=transcript,
-            waveform=waveform,
-            sample_rate=sample_rate
-        )
+def parse_raw(sample):
+    key = sample['key']
+    wav_file = sample['wav_path']
+    transcript = sample['transcript']
+    waveform, sample_rate = torchaudio.load(wav_file)
+    sample = dict(
+        key=key,
+        transcript=transcript,
+        waveform=waveform,
+        sample_rate=sample_rate
+    )
 
-        yield example
+    return sample
 
 
-def filter_data(data,
+def filter_data(sample,
                 max_length,
                 min_length,
                 token_max_length,
                 token_min_length,
                 min_output_input_ratio,
                 max_output_input_ratio):
-    for sample in data:
-        num_frames = sample['waveform'].size(1) / sample['sample_rate']
-        if num_frames < min_length or num_frames > max_length:
-            continue
+    num_frames = sample['waveform'].size(1) / sample['sample_rate'] * 100
+    if num_frames < min_length or num_frames > max_length:
+        return False
 
-        if len(sample['label']) < token_min_length or len(sample['label']) > token_max_length:
-            continue
+    if len(sample['label']) < token_min_length or len(sample['label']) > token_max_length:
+        return False
 
-        if len(sample['label']) / num_frames < min_output_input_ratio or len(
-                sample['label']) / num_frames > max_output_input_ratio:
-            continue
-
-        yield sample
+    if len(sample['label']) / num_frames < min_output_input_ratio or len(
+            sample['label']) / num_frames > max_output_input_ratio:
+        return False
+    return True
 
 
-def resample(data, resample_rate=16000):
-    for sample in data:
-        sample_rate = sample['sample_rate']
-        waveform = sample['waveform']
-        if sample_rate != resample_rate:
-            sample['sample_rate'] = resample_rate
-            sample['waveform'] = torchaudio.transforms.Resample(
-                orig_freq=sample_rate, new_freq=resample_rate
-            )(waveform)
+def resample(sample, resample_rate=16000):
+    sample_rate = sample['sample_rate']
+    waveform = sample['waveform']
+    if sample_rate != resample_rate:
+        sample['sample_rate'] = resample_rate
+        sample['waveform'] = torchaudio.transforms.Resample(
+            orig_freq=sample_rate, new_freq=resample_rate
+        )(waveform)
 
-        yield sample
+    return sample
 
 
-def speed_perturb(data, speeds=None):
+def speed_perturb(sample, speeds=None):
     if speeds is None:
         speeds = [0.9, 1.0, 1.1]
 
-    for sample in data:
-        sample_rate = sample['sample_rate']
-        waveform = sample['waveform']
-        speed = random.choice(speeds)
-        if speed != 1.0:
-            waveform = torchaudio.sox_effects.apply_effects_tensor(
-                waveform, sample_rate,
-                [['speed', str(speed)], ['rate', str(sample_rate)]]
-            )
-        sample['waveform'] = waveform
 
-        yield sample
+    sample_rate = sample['sample_rate']
+    waveform = sample['waveform']
+    speed = random.choice(speeds)
+    if speed != 1.0:
+        waveform, _ = torchaudio.sox_effects.apply_effects_tensor(
+            waveform, sample_rate,
+            [['speed', str(speed)], ['rate', str(sample_rate)]]
+        )
+    sample['waveform'] = waveform
+
+    return sample
 
 
 def __tokenize_by_bpe_model(sp, transcript):
@@ -91,7 +87,7 @@ def __tokenize_by_bpe_model(sp, transcript):
     return tokens
 
 
-def tokenize(data,
+def tokenize(sample,
              vocabs,
              bpe_model=None,
              non_lang_syms=None,
@@ -109,89 +105,87 @@ def tokenize(data,
     else:
         sp = None
 
-    for sample in data:
-        transcript = sample['transcript']
-        if non_lang_syms_pattern is not None:
-            parts = non_lang_syms_pattern.split(transcript.upper())
-            parts = [w for w in parts if len(w.strip()) > 0]
+
+    transcript = sample['transcript']
+    if non_lang_syms_pattern is not None:
+        parts = non_lang_syms_pattern.split(transcript.upper())
+        parts = [w for w in parts if len(w.strip()) > 0]
+    else:
+        parts = [transcript]
+
+    label = []
+    tokens = []
+
+    for part in parts:
+        if part in non_lang_syms:
+            tokens.append(part)
         else:
-            parts = [transcript]
-
-        label = []
-        tokens = []
-
-        for part in parts:
-            if part in non_lang_syms:
-                tokens.append(part)
+            if bpe_model is not None:
+                tokens.extend(__tokenize_by_bpe_model(sp, part))
             else:
-                if bpe_model is not None:
-                    tokens.extend(__tokenize_by_bpe_model(sp, part))
-                else:
-                    if split_with_space:
-                        part = part.split(" ")
-                    for ch in part:
-                        if ch == ' ':
-                            ch = '_'
-                        tokens.append(ch)
+                if split_with_space:
+                    part = part.split(" ")
+                for ch in part:
+                    if ch == ' ':
+                        ch = '_'
+                    tokens.append(ch)
 
-        for ch in tokens:
-            if ch in vocabs:
-                label.append(ch)
-            elif '<unk>' in vocabs:
-                label.append(vocabs['<unk>'])
+    for ch in tokens:
+        if ch in vocabs:
+            label.append(vocabs[ch])
+        elif '<unk>' in vocabs:
+            label.append(vocabs['<unk>'])
 
-        sample['tokens'] = tokens
-        sample['label'] = label
+    sample['tokens'] = tokens
+    sample['label'] = label
 
-        yield sample
+    return sample
 
 
-def spec_aug(data,
+def spec_aug(sample,
              num_t_mask,
              num_f_mask,
              max_t,
              max_f):
-    for sample in data:
-        x = sample['feat']
-        y = x.clone().detach()
-        max_frames = y.size(0)
-        max_freq = y.size(1)
-        for _ in range(num_t_mask):
-            start = random.randint(0, max_frames - 1)
-            length = random.randint(1, max_t)
-            end = min(max_frames, start + length)
-            y[start:end, :] = 0
-        for _ in range(num_f_mask):
-            start = random.randint(0, max_freq - 1)
-            length = random.randint(1, max_f)
-            end = min(max_freq, start + length)
-            y[:, start:end] = 0
-        sample['feat'] = y
 
-        yield sample
+    x = sample['feat']
+    y = x.clone().detach()
+    max_frames = y.size(0)
+    max_freq = y.size(1)
+    for _ in range(num_t_mask):
+        start = random.randint(0, max_frames - 1)
+        length = random.randint(1, max_t)
+        end = min(max_frames, start + length)
+        y[start:end, :] = 0
+    for _ in range(num_f_mask):
+        start = random.randint(0, max_freq - 1)
+        length = random.randint(1, max_f)
+        end = min(max_freq, start + length)
+        y[:, start:end] = 0
+    sample['feat'] = y
+    return sample
 
 
-def compute_fbank(data,
+def compute_fbank(sample,
                   num_mel_bins,
                   frame_length,
                   frame_shift,
                   dither):
-    for sample in data:
-        waveform = data['waveform']
-        sample_rate = data['sample_rate']
-        waveform = waveform * (1 << 15)
-        feat = kaldi.fbank(waveform,
-                           num_mel_bins=num_mel_bins,
-                           frame_length=frame_length,
-                           frame_shift=frame_shift,
-                           dither=dither,
-                           energy_floor=0.0,
-                           sample_frequency=sample_rate)
-        yield dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
+    waveform = sample['waveform']
+    sample_rate = sample['sample_rate']
+    waveform = waveform * (1 << 15)
+    feat = kaldi.fbank(waveform,
+                       num_mel_bins=num_mel_bins,
+                       frame_length=frame_length,
+                       frame_shift=frame_shift,
+                       dither=dither,
+                       energy_floor=0.0,
+                       sample_frequency=sample_rate)
+    sample = dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
+    return sample
 
 
-
-def compute_mfcc(data,
+def compute_mfcc(sample,
                  num_mel_bins,
                  frame_length,
                  frame_shift,
@@ -199,20 +193,49 @@ def compute_mfcc(data,
                  num_ceps,
                  high_freq,
                  low_freq):
-    for sample in data:
-        waveform = sample['waveform']
-        sample_rate = sample['sample_rate']
-        waveform *= (1 << 15)
-        feat = kaldi.mfcc(waveform,
-                          num_mel_bins=num_mel_bins,
-                          frame_length=frame_length,
-                          frame_shift=frame_shift,
-                          dither=dither,
-                          num_ceps=num_ceps,
-                          high_freq=high_freq,
-                          low_freq=low_freq,
-                          sample_frequency=sample_rate)
-        yield dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
+    waveform = sample['waveform']
+    sample_rate = sample['sample_rate']
+    waveform *= (1 << 15)
+    feat = kaldi.mfcc(waveform,
+                      num_mel_bins=num_mel_bins,
+                      frame_length=frame_length,
+                      frame_shift=frame_shift,
+                      dither=dither,
+                      num_ceps=num_ceps,
+                      high_freq=high_freq,
+                      low_freq=low_freq,
+                      sample_frequency=sample_rate)
+    sample = dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
+    return sample
+
+
+def collate_fn(batch):
+    keys = []
+    inputs = []
+    input_lengths = []
+    targets = []
+    target_lengths = []
+    sentences = []
+    for item in batch:
+        key, feat, label, sentence = item['key'], item['feat'], torch.tensor(item['label'], dtype=torch.int64), item[
+            'transcript']
+        keys.append(key)
+        inputs.append(feat)
+        input_lengths.append(feat.size(0))
+        targets.append(label)
+        target_lengths.append(label.size(0))
+        sentences.append(sentence)
+
+    input_lengths = torch.tensor(input_lengths, dtype=torch.int32)
+    target_lengths = torch.tensor(target_lengths, dtype=torch.int32)
+    inputs = pad_sequence(inputs,
+                          batch_first=True,
+                          padding_value=0)
+    targets = pad_sequence(targets,
+                           batch_first=True,
+                           padding_value=0)
+    return keys, inputs, input_lengths, targets, target_lengths, sentences
+
 
 
 def shuffle(data, shuffle_size=10000):
@@ -298,15 +321,13 @@ def padding(batched_data):
                                     padding_value=0)
         padded_labels = pad_sequence(sorted_labels,
                                      batch_first=True,
-                                     padding_value=-1
+                                     padding_value=0
                                      )
-
-        yield {
-            'keys': sorted_keys,
-            'inputs': padded_feats,
-            'input_lengths': feats_length,
-            'targets': padded_labels,
-            'target_lengths': label_lengths,
-            'sentences': transcripts
-        }
-
+        yield (
+            sorted_keys,
+            padded_feats,
+            feats_length,
+            padded_labels,
+            label_lengths,
+            transcripts
+        )

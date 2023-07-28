@@ -9,7 +9,7 @@ class ConvolutionModule(nn.Module):
         self.layer_norm = nn.LayerNorm(input_dim)
         self.pointwise_conv_one = nn.Linear(input_dim, input_dim * expansion_factor)
         self.glu = nn.GLU()
-        self.depthwise_conv = nn.Conv1d(in_channels=input_dim,
+        self.depthwise_conv = nn.Conv1d(in_channels=input_dim * expansion_factor // 2,
                                         out_channels=input_dim,
                                         kernel_size=kernel_size,
                                         stride=1,
@@ -20,7 +20,12 @@ class ConvolutionModule(nn.Module):
         self.pointwise_conv_two = nn.Linear(input_dim, input_dim)
         self.dropout = nn.Dropout()
 
-    def forward(self, inputs):
+    def forward(self, inputs, input_lengths):
+        max_length = input_lengths.max().item()
+        mask = torch.arange(max_length, device=input_lengths.device).expand(len(input_lengths), max_length) >= input_lengths.unsqueeze(1)
+        mask = mask.unsqueeze(2)
+        if mask.size(2) > 0:
+            inputs = inputs.masked_fill(mask, 0.0)
         outputs = self.layer_norm(inputs)
         outputs = self.pointwise_conv_one(outputs)
         outputs = self.glu(outputs)
@@ -29,6 +34,9 @@ class ConvolutionModule(nn.Module):
         outputs = self.swish(outputs).permute(0, 2, 1)
         outputs = self.pointwise_conv_two(outputs)
         outputs = self.dropout(outputs)
+        if mask.size(2) > 0:
+            outputs = outputs.masked_fill(mask, 0.0)
+
         outputs = outputs + inputs
         return outputs
 
@@ -38,7 +46,6 @@ class MaskConv2d(nn.Module):
     def __init__(self, module):
         super(MaskConv2d, self).__init__()
         self.module = module
-
 
     def forward(self, inputs, seq_lengths):
         numerator = seq_lengths + 2 * self.module.padding[1] - self.module.dilation[1] * (
@@ -57,8 +64,6 @@ class MaskConv2d(nn.Module):
         return outputs, seq_lengths
 
 
-
-
 class ConvolutionSubSampling(nn.Module):
 
     def __init__(self, in_channels, out_channels):
@@ -67,7 +72,6 @@ class ConvolutionSubSampling(nn.Module):
         self.relu_one = nn.ReLU()
         self.conv_two = MaskConv2d(nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=2))
         self.relu_two = nn.ReLU()
-
 
     def forward(self, inputs, input_lengths):
         outputs, output_lengths = self.conv_one(inputs.unsqueeze(1), input_lengths)
