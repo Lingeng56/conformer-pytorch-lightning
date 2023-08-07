@@ -1,122 +1,121 @@
 import torch.nn as nn
-import torch
+from attention import PositionalEncoding
+from decoder_layer import TransformerDecoderLayer
+from utils import *
 
 
-class View(nn.Module):
+class CTCDecoder(nn.Module):
 
-    def __init__(self, shape, contiguous=True):
-        super(View, self).__init__()
-        self.shape = shape
-        self.contiguous = contiguous
-
-
-    def forward(self, inputs):
-        return inputs.view(self.shape).contiguous() if self.contiguous else inputs.view(self.shape)
-
-
-class CTCLSTMDecoder(nn.Module):
-
-    def __init__(self, encoder_dim, hidden_size, num_decoder_layers, dropout, vocab_size):
-        super(CTCLSTMDecoder, self).__init__()
-        self.lstm = nn.LSTM(input_size=encoder_dim, hidden_size=hidden_size, batch_first=True, num_layers=num_decoder_layers)
+    def __init__(self,
+                 vocab_size,
+                 encoder_dim,
+                 dropout):
+        super(CTCDecoder, self).__init__()
+        self.proj = nn.Linear(encoder_dim, vocab_size)
         self.dropout = nn.Dropout(dropout)
-        self.proj = nn.Linear(hidden_size, vocab_size)
-        self.softmax = nn.LogSoftmax(dim=-1)
+        self.criterion = nn.CTCLoss(reduction='sum')
 
-    def forward(self, inputs):
-        outputs, _ = self.lstm(inputs)
-        outputs = self.dropout(outputs)
+    def forward(self, encoder_out, encoder_out_lens, padded_labels, label_lengths):
+        logits = self.proj(self.dropout(encoder_out))
+        probs = logits.transpose(0, 1).log_softmax(2)
+        loss = self.criterion(probs, padded_labels, encoder_out_lens, label_lengths)
+        loss = loss / padded_labels.size(0)
+        return loss
+
+
+class TransformerDecoder(nn.Module):
+
+    def __init__(self,
+                 vocab_size,
+                 decoder_dim,
+                 num_heads,
+                 hidden_dim,
+                 num_layers,
+                 dropout,
+                 positional_dropout,
+                 self_attention_dropout,
+                 src_attention_dropout
+                 ):
+        super(TransformerDecoder, self).__init__()
+        self.embed = nn.Sequential(nn.Embedding(vocab_size, decoder_dim),
+                                   PositionalEncoding(decoder_dim, positional_dropout))
+        self.norm = nn.LayerNorm(decoder_dim, eps=1e-5)
+        self.proj = nn.Linear(decoder_dim, vocab_size)
+        self.decoders = nn.ModuleList([
+            TransformerDecoderLayer(decoder_dim,
+                                    num_heads,
+                                    hidden_dim,
+                                    dropout,
+                                    self_attention_dropout,
+                                    src_attention_dropout)
+            for _ in range(num_layers)
+        ])
+
+    def forward(self,
+                memory,
+                memory_mask,
+                targets,
+                target_lengths,
+                r_targets,
+                reverse_weight
+                ):
+        max_len = targets.size(1)
+        targets_mask = ~make_pad_mask(target_lengths, max_len).unsqueeze(1).to(targets.device)
+        outputs, _ = self.embed(targets)
+        m = make_subsequent_mask(targets_mask.size(-1), targets_mask.device).unsuqeeze(0)
+        targets_mask = targets_mask & m
+        for layer in self.decoders:
+            outputs, targets_mask, memory, memory_mask = layer(outputs, targets_mask, memory, memory_mask)
+
+        outputs = self.norm(outputs)
         outputs = self.proj(outputs)
-        outputs = self.softmax(outputs)
-        return outputs
+        output_lengths = targets_mask.sum(dim=1)
+        return outputs, torch.tensor(0.0), output_lengths
 
 
-class LSTMAttentionDecoder(nn.Module):
+class BiTransformerDecoder(nn.Module):
 
-    def __init__(self, hidden_state_dim, decoder_layer_nums, num_heads, dropout, vocab_size, max_len):
-        super(LSTMAttentionDecoder, self).__init__()
-        self.max_len = max_len
-        self.hidden_state_dim = hidden_state_dim
-        self.decoder_layer_nums = decoder_layer_nums
-        self.vocab_size = vocab_size
-        self.lstm = nn.LSTM(
-            input_size=self.hidden_state_dim,
-            hidden_size=self.hidden_state_dim,
-            num_layers=self.decoder_layer_nums,
-            batch_first=True,
-            dropout=dropout,
-            bias=True,
-            bidirectional=False
-                            )
-        self.fc = nn.Sequential(
-            nn.Linear(self.hidden_state_dim << 1, self.hidden_state_dim),
-            nn.Tanh(),
-            View(shape=(-1, self.hidden_state_dim), contiguous=True),
-            nn.Linear(self.hidden_state_dim, self.vocab_size)
-        )
-        self.dropout = nn.Dropout(dropout)
-        self.embedding = nn.Embedding(self.vocab_size,
-                                      self.hidden_state_dim)
-        self.attention = nn.MultiheadAttention(self.hidden_state_dim,
+    def __init__(self,
+                 vocab_size,
+                 decoder_dim,
+                 num_heads,
+                 hidden_dim,
+                 num_layers,
+                 r_num_layers,
+                 dropout,
+                 pos_enc_dropout,
+                 self_attention_dropout,
+                 src_attention_dropout):
+        super(BiTransformerDecoder, self).__init__()
+        self.left_encoder = TransformerDecoder(vocab_size,
+                                               decoder_dim,
                                                num_heads,
-                                               batch_first=True)
-        self.softmax = nn.LogSoftmax(dim=-1)
+                                               hidden_dim,
+                                               num_layers,
+                                               dropout,
+                                               pos_enc_dropout,
+                                               self_attention_dropout,
+                                               src_attention_dropout)
+        self.right_encoder = TransformerDecoder(vocab_size,
+                                                decoder_dim,
+                                                num_heads,
+                                                hidden_dim,
+                                                r_num_layers,
+                                                dropout,
+                                                pos_enc_dropout,
+                                                self_attention_dropout,
+                                                src_attention_dropout)
 
 
-    def forward_step(self, input_var, hidden_states, encoder_outputs):
-        batch_size, output_lengths = input_var.size(0), input_var.size(1)
+    def forward(self,
+                memory,
+                memory_mask,
+                targets,
+                target_lengths,
+                r_targets,
+                reverse_weight):
+        left_outputs, right_outputs, output_lengths = self.left_encoder(memory, memory_mask, targets, target_lengths)
+        if reverse_weight > 0.0:
+            right_outputs, _, output_lengths = self.right_encoder(memory, memory_mask, r_targets, target_lengths)
 
-        embedded = self.embedding(input_var)
-        embedded = self.dropout(embedded)
-
-        if self.training:
-            self.lstm.flatten_parameters()
-
-        outputs, hidden_states = self.lstm(embedded, hidden_states)
-
-        context, attn = self.attention(outputs, encoder_outputs, encoder_outputs)
-
-        outputs = torch.cat((outputs, context), dim=2)
-
-        step_outputs = self.fc(outputs.view(-1, self.hidden_state_dim << 1))
-        step_outputs = self.softmax(step_outputs)
-        step_outputs = step_outputs.view(batch_size, output_lengths, -1).squeeze(1)
-
-        return step_outputs, hidden_states
-
-
-
-    def forward(self, encoder_outputs, targets=None):
-        hidden_states, attn = None, None
-        targets, batch_size, max_length = self.validate_args(encoder_outputs, targets)
-        input_var = targets[:, 0].unsqueeze(1)
-        logits = list()
-
-        for di in range(max_length):
-            step_outputs, hidden_states = self.forward_step(
-                input_var=input_var,
-                hidden_states=hidden_states,
-                encoder_outputs=encoder_outputs
-            )
-            logits.append(step_outputs)
-            input_var = logits[-1].topk(1)[1]
-
-        logits = torch.stack(logits, dim=1)
-
-        return logits
-
-
-
-    def validate_args(self, encoder_outputs, targets=None):
-        batch_size = encoder_outputs.size(0)
-
-        if targets is None:
-            targets = torch.LongTensor([2] * batch_size).view(batch_size, 1).to(encoder_outputs.device)
-            max_length = self.max_len
-
-        else:
-            max_length = targets.size(1)
-
-        return targets, batch_size, max_length
-
-
+        return left_outputs, right_outputs, output_lengths

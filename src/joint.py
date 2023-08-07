@@ -14,16 +14,17 @@ class TransducerJoint(nn.Module):
         self.activation = nn.Tanh()
         self.enc_ffn = nn.Linear(enc_output_size, join_dim)
         self.pred_ffn = nn.Linear(pred_output_size, join_dim)
-        self.post_ffn = nn.Linear(join_dim, join_dim)
         self.ffn_out = nn.Linear(join_dim, vocab_size)
 
 
     def forward(self,
                 enc_out,
-                pred_out):
+                pred_out,
+                pre_project=True):
 
-        enc_out = self.enc_ffn(enc_out)
-        pred_out = self.pred_ffn(pred_out)
+        if pre_project:
+            enc_out = self.enc_ffn(enc_out)
+            pred_out = self.pred_ffn(pred_out)
 
         if enc_out.ndim != 4:
             enc_out = enc_out.unsqueeze(2)
@@ -32,7 +33,6 @@ class TransducerJoint(nn.Module):
             pred_out = pred_out.unsqueeze(1)
 
         out = enc_out + pred_out
-        out = self.post_ffn(out)
         out = self.activation(out)
         out = self.ffn_out(out)
         return out

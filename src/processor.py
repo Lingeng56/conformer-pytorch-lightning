@@ -4,6 +4,7 @@ import torch
 import random
 import re
 from torch.nn.utils.rnn import pad_sequence
+from tqdm import tqdm
 
 
 def parse_raw(sample):
@@ -166,21 +167,10 @@ def spec_aug(sample,
     return sample
 
 
-def compute_fbank(sample,
-                  num_mel_bins,
-                  frame_length,
-                  frame_shift,
-                  dither):
+def compute_fbank(sample, transform):
     waveform = sample['waveform']
-    sample_rate = sample['sample_rate']
-    waveform = waveform * (1 << 15)
-    feat = kaldi.fbank(waveform,
-                       num_mel_bins=num_mel_bins,
-                       frame_length=frame_length,
-                       frame_shift=frame_shift,
-                       dither=dither,
-                       energy_floor=0.0,
-                       sample_frequency=sample_rate)
+    feat = transform(waveform)
+    feat = feat.squeeze(0).permute(1, 0)
     sample = dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
     return sample
 
@@ -209,14 +199,14 @@ def compute_mfcc(sample,
     return sample
 
 
-def collate_fn(batch):
+def collate_fn(batch_):
     keys = []
     inputs = []
     input_lengths = []
     targets = []
     target_lengths = []
     sentences = []
-    for item in batch:
+    for item in batch_:
         key, feat, label, sentence = item['key'], item['feat'], torch.tensor(item['label'], dtype=torch.int64), item[
             'transcript']
         keys.append(key)
@@ -307,7 +297,8 @@ def batch(data, batch_type, **kwargs):
 
 
 def padding(batched_data):
-    for data in batched_data:
+    dataset = []
+    for data in tqdm(batched_data, desc='Batching Data...'):
         feats_length = torch.tensor([x['feat'].size(0) for x in data], dtype=torch.int32)
         order = torch.argsort(feats_length, descending=True)
         feats_length = torch.tensor([data[i]['feat'].size(0) for i in order], dtype=torch.int32)
@@ -323,11 +314,12 @@ def padding(batched_data):
                                      batch_first=True,
                                      padding_value=0
                                      )
-        yield (
+        dataset.append((
             sorted_keys,
             padded_feats,
             feats_length,
             padded_labels,
             label_lengths,
             transcripts
-        )
+        ))
+    return dataset

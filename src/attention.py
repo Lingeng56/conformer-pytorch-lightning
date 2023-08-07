@@ -5,7 +5,7 @@ import math
 
 class RelativePositionalEncoding(nn.Module):
 
-    def __init__(self, d_model, dropout, max_len):
+    def __init__(self, d_model, dropout, max_len=5000):
         super(RelativePositionalEncoding, self).__init__()
 
         self.dropout = nn.Dropout(p=dropout)
@@ -36,18 +36,21 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         self.pos_bias_u = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.pos_bias_v = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
 
         nn.init.xavier_uniform_(self.pos_bias_u)
         nn.init.xavier_uniform_(self.pos_bias_v)
 
 
-    def forward(self, inputs, pos_embed):
-        batch_size = inputs.size(0)
-        inputs = self.layer_norm(inputs)
-        q = self.w_query(inputs).view(batch_size, -1, self.num_heads, self.d_k)
-        k = self.w_key(inputs).view(batch_size, -1, self.num_heads, self.d_k)
-        v = self.w_value(inputs).view(batch_size, -1, self.num_heads, self.d_k)
+    def forward(self,
+                query,
+                key,
+                value,
+                inputs_attn_mask,
+                pos_embed):
+        batch_size = query.size(0)
+        q = self.w_query(query).view(batch_size, -1, self.num_heads, self.d_k)
+        k = self.w_key(key).view(batch_size, -1, self.num_heads, self.d_k)
+        v = self.w_value(value).view(batch_size, -1, self.num_heads, self.d_k)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
@@ -63,13 +66,17 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         matrix_bd = torch.matmul(q_with_bias_v, p.transpose(-2, -1))
 
         scores = (matrix_ac + matrix_bd) / math.sqrt(self.d_k)
-        scores = scores
-        attn = torch.softmax(scores, dim=-1)
+        if inputs_attn_mask.size(2) > 0:
+            mask = inputs_attn_mask.unsqueeze(1).eq(0)
+            scores = scores.masked_fill(mask, -float('inf'))
+            attn = torch.softmax(scores, dim=-1).masked_fill(mask, 0.0)
+        else:
+            attn = torch.softmax(scores, dim=-1)
         attn = self.dropout(attn)
         outputs = torch.matmul(attn, v)
         outputs = (outputs.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k))
 
-        outputs = inputs + self.projection(outputs)
+        outputs = self.projection(outputs)
         return outputs
 
 
@@ -77,7 +84,7 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
 
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model, dropout, max_len):
+    def __init__(self, d_model, dropout, max_len=5000):
         super(PositionalEncoding, self).__init__()
 
         self.dropout = nn.Dropout(p=dropout)
@@ -104,26 +111,33 @@ class MultiHeadSelfAttentionModule(nn.Module):
         self.w_value = nn.Linear(encoder_dim, encoder_dim)
         self.projection = nn.Linear(encoder_dim, encoder_dim)
         self.dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
 
     def forward(self,
-                inputs,
+                query,
+                key,
+                value,
+                inputs_attn_mask,
                 pos_embed):
-        batch_size = inputs.size(0)
-        inputs = self.layer_norm(inputs)
-        q = self.w_query(inputs).view(batch_size, -1, self.num_heads, self.d_k)
-        k = self.w_key(inputs).view(batch_size, -1, self.num_heads, self.d_k)
-        v = self.w_value(inputs).view(batch_size, -1, self.num_heads, self.d_k)
+        batch_size = query.size(0)
+        q = self.w_query(query).view(batch_size, -1, self.num_heads, self.d_k)
+        k = self.w_key(key).view(batch_size, -1, self.num_heads, self.d_k)
+        v = self.w_value(value).view(batch_size, -1, self.num_heads, self.d_k)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
-        attn = torch.softmax(scores, dim=-1)
+        if inputs_attn_mask.size(2) > 0:
+            mask = inputs_attn_mask.unsqueeze(1).eq(0)
+            scores = scores.masked_fill(mask, -float('inf'))
+            attn = torch.softmax(scores, dim=-1).masked_fill(mask, 0.0)
+        else:
+            attn = torch.softmax(scores, dim=-1)
         attn = self.dropout(attn)
         outputs = torch.matmul(attn, v)
         outputs = (outputs.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k))
 
-        outputs = inputs + self.projection(outputs)
+        outputs = self.projection(outputs)
+        outputs = self.dropout(outputs)
 
         return outputs
 

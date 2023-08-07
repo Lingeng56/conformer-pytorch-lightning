@@ -25,7 +25,7 @@ class Predictor(nn.Module):
                             batch_first=True,
                             dropout=dropout)
         self.projection = nn.Linear(hidden_size, output_size)
-
+        self.embed_size = embed_size
 
 
     def init_state(

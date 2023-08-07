@@ -1,7 +1,7 @@
 import json
 import os
 import pickle
-from torch.utils.data import Dataset, IterableDataset
+from torch.utils.data import Dataset
 from processor import *
 from tqdm import tqdm
 
@@ -36,31 +36,43 @@ class DataList(Dataset):
         return len(self.data_list)
 
 
-class CustomDataset(IterableDataset):
+class CustomDataset(Dataset):
 
     def __init__(self, data_config, mode):
         self.data_config = data_config
         self.mode = mode
+        self.fbank_transform = torchaudio.transforms.MelSpectrogram(
+            sample_rate=16000,
+            n_fft=400,  # Window size of 25ms (assuming sample_rate=16000)
+            hop_length=160,  # Stride of 10ms (assuming sample_rate=16000)
+            n_mels=80
+        )
         self.__prepare_data()
         if data_config['batch']:
             self.__batched_data()
 
 
     def __batched_data(self):
-        if self.data_config['shuffle']:
-            self.dataset = shuffle(self.dataset,
-                                   self.data_config['shuffle_size'])
+        if os.path.exists(self.data_config[f'{self.mode}_batched_pkl_path']):
+            self.dataset = pickle.load(open(self.data_config[f'{self.mode}_pkl_path'], 'rb'))
+        else:
+            if self.data_config['shuffle']:
+                self.dataset = shuffle(self.dataset,
+                                       self.data_config['shuffle_size'])
 
-        if self.data_config['sort']:
-            self.dataset = sort(self.dataset,
-                                self.data_config['sort_size'])
+            if self.data_config['sort']:
+                self.dataset = sort(self.dataset,
+                                    self.data_config['sort_size'])
 
-        self.dataset = batch(self.dataset,
-                             self.data_config['batch_type'],
-                             batch_size=self.data_config['batch_size'],
-                             max_frames_in_batch=self.data_config['max_frames_in_batch'])
+            self.dataset = batch(self.dataset,
+                                 self.data_config['batch_type'],
+                                 batch_size=self.data_config['batch_size'],
+                                 max_frames_in_batch=self.data_config['max_frames_in_batch'])
 
-        self.dataset = padding(self.dataset)
+            self.dataset = padding(self.dataset)
+            pickle.dump(self.dataset, open(self.data_config[f'{self.mode}_batched_pkl_path'], 'wb'))
+        print(f'Loaded Batched {self.mode} Dataset ({len(self.dataset)} Batches)')
+
 
     def __prepare_data(self):
         if os.path.exists(self.data_config[f'{self.mode}_pkl_path']):
@@ -95,11 +107,8 @@ class CustomDataset(IterableDataset):
                                            speeds=self.data_config['speeds'])
 
                 if self.data_config['feat_type'] == 'fbank':
-                    sample = compute_fbank(sample,
-                                           num_mel_bins=self.data_config['num_mel_bins'],
-                                           frame_length=self.data_config['frame_length'],
-                                           frame_shift=self.data_config['frame_shift'],
-                                           dither=self.data_config['dither'])
+                    sample = compute_fbank(sample, self.fbank_transform)
+
                 elif self.data_config['feat_type'] == 'mfcc':
                     sample = compute_mfcc(sample,
                                           num_mel_bins=self.data_config['num_mel_bins'],
@@ -120,10 +129,8 @@ class CustomDataset(IterableDataset):
             pickle.dump(self.dataset, open(self.data_config[f'{self.mode}_pkl_path'], 'wb'))
         print(f'Loaded {self.mode} Dataset ({len(self.dataset)} Samples)')
 
-    def __iter__(self):
-        for sample in self.dataset:
-            yield sample
-
+    def __getitem__(self, idx):
+        return self.dataset[idx]
 
     def __len__(self):
         return len(self.dataset)
