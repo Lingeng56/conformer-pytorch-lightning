@@ -236,6 +236,7 @@ def shuffle(data, shuffle_size=10000):
             random.shuffle(buf)
             for x in buf:
                 yield x
+            buf = []
 
     random.shuffle(buf)
     for x in buf:
@@ -252,6 +253,7 @@ def sort(data, sort_size):
             buf = sorted(buf, key=lambda item: item['feat'].size(0))
             for x in buf:
                 yield x
+            buf = []
 
     buf = sorted(buf, key=lambda item: item['feat'].size(0))
     for x in buf:

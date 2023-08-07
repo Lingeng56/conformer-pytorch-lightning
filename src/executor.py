@@ -105,15 +105,15 @@ class Executor:
         test_dataset = CustomDataset(cv_config, mode='dev')
         self.train_dataloader = DataLoader(train_dataset,
                                            batch_size=None,
-                                           # num_workers=args.num_workers,
-                                           # pin_memory=args.pin_memory,
-                                           # prefetch_factor=args.prefetch,
+                                           num_workers=args.num_workers,
+                                           pin_memory=args.pin_memory,
+                                           prefetch_factor=args.prefetch,
                                            )
         self.test_dataloader = DataLoader(test_dataset,
                                           batch_size=None,
-                                          # num_workers=args.num_workers,
-                                          # pin_memory=args.pin_memory,
-                                          # prefetch_factor=args.prefetch,
+                                          num_workers=args.num_workers,
+                                          pin_memory=args.pin_memory,
+                                          prefetch_factor=args.prefetch,
                                           )
 
     def __build_trainer(self, args):
@@ -139,8 +139,7 @@ class Executor:
             num_sanity_val_steps=2,
             gradient_clip_val=args.grad_clip,
             accumulate_grad_batches=args.accum_grad,
-            precision=16,
-            strategy="deepspeed_stage_1"
+            precision=16
         )
 
     def train(self):
