@@ -42,7 +42,7 @@ class TransformerDecoderLayer(nn.Module):
                 tgt_mask,
                 memory,
                 memory_mask,
-                cache):
+                cache=None):
 
         if cache is None:
             tgt_q = self.norm1(tgt)

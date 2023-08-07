@@ -18,7 +18,7 @@ class CTCDecoder(nn.Module):
     def forward(self, encoder_out, encoder_out_lens, padded_labels, label_lengths):
         logits = self.proj(self.dropout(encoder_out))
         probs = logits.transpose(0, 1).log_softmax(2)
-        loss = self.criterion(probs, padded_labels, encoder_out_lens, label_lengths)
+        loss = self.criterion(probs.to(torch.float32), padded_labels, encoder_out_lens, label_lengths)
         loss = loss / padded_labels.size(0)
         return loss
 
@@ -56,13 +56,13 @@ class TransformerDecoder(nn.Module):
                 memory_mask,
                 targets,
                 target_lengths,
-                r_targets,
-                reverse_weight
+                r_targets=None,
+                reverse_weight=None
                 ):
         max_len = targets.size(1)
         targets_mask = ~make_pad_mask(target_lengths, max_len).unsqueeze(1).to(targets.device)
         outputs, _ = self.embed(targets)
-        m = make_subsequent_mask(targets_mask.size(-1), targets_mask.device).unsuqeeze(0)
+        m = make_subsequent_mask(targets_mask.size(-1), targets_mask.device).unsqueeze(0)
         targets_mask = targets_mask & m
         for layer in self.decoders:
             outputs, targets_mask, memory, memory_mask = layer(outputs, targets_mask, memory, memory_mask)

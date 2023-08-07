@@ -16,7 +16,7 @@ class RelativePositionalEncoding(nn.Module):
         self.pe[:, 0, 1::2] = torch.cos(position * div_term)
 
     def forward(self, inputs):
-        pos_embed = self.pe[:inputs.size(0)].to(inputs.device)
+        pos_embed = self.pe[:inputs.size(0)].to(inputs.device).to(inputs.dtype)
         return self.dropout(inputs), self.dropout(pos_embed)
 
 
@@ -90,12 +90,12 @@ class PositionalEncoding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         position = torch.arange(max_len).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        self.pe = torch.zeros(max_len, 1, d_model)
+        self.pe = torch.zeros(max_len, 1, d_model, dtype=torch.float16)
         self.pe[:, 0, 0::2] = torch.sin(position * div_term)
         self.pe[:, 0, 1::2] = torch.cos(position * div_term)
 
     def forward(self, inputs):
-        pos_embed = self.pe[:inputs.size(0)].to(inputs.device)
+        pos_embed = self.pe[:inputs.size(0)].to(inputs.device).to(inputs.dtype)
         x = inputs + pos_embed
         return self.dropout(x), self.dropout(pos_embed)
 
@@ -117,7 +117,7 @@ class MultiHeadSelfAttentionModule(nn.Module):
                 key,
                 value,
                 inputs_attn_mask,
-                pos_embed):
+                pos_embed=None):
         batch_size = query.size(0)
         q = self.w_query(query).view(batch_size, -1, self.num_heads, self.d_k)
         k = self.w_key(key).view(batch_size, -1, self.num_heads, self.d_k)

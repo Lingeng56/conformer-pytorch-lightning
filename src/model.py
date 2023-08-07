@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 import k2
 from utils import add_blank, add_sos_eos, reverse_sequence
 from scheduler import WarmupLR
+from label_smoothing_loss import LabelSmoothingLoss
 
 
 class Transducer(pl.LightningModule):
@@ -59,6 +60,13 @@ class Transducer(pl.LightningModule):
         self.simple_am_proj = nn.Linear(self.encoder.encoder_dim, vocab_size)
         self.simple_lm_proj = nn.Linear(self.predictor.embed_size, vocab_size)
 
+        # For AttentionLoss
+        self.criterion_attn = LabelSmoothingLoss(
+                size=vocab_size,
+                padding_idx=ignore_id,
+                smoothing=lsm_weight
+            )
+
     def training_step(self, batch, batch_idx):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         encoder_out, encoder_mask = self.encoder(padded_feats, feats_length)
@@ -80,11 +88,11 @@ class Transducer(pl.LightningModule):
 
         loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
 
-        self.log('train_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('train_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('train_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('train_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-
+        self.log('train_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('train_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('train_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('train_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('train_batch_size', encoder_out.size(0), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -108,10 +116,10 @@ class Transducer(pl.LightningModule):
 
         loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
 
-        self.log('valid_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('valid_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('valid_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
-        self.log('valid_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True)
+        self.log('valid_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('valid_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('valid_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        self.log('valid_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
 
     def rnnt_loss(self,
                   encoder_out,
@@ -204,6 +212,7 @@ class Transducer(pl.LightningModule):
             r_loss_attn = self.criterion_attn(r_decoder_out, r_output_targets)
 
         loss_attn = loss_attn * (1 - self.reverse_weight) + self.reverse_weight * r_loss_attn
+        loss_attn = loss_attn.sum()
         return loss_attn
 
     def ctc_loss(self,
@@ -214,7 +223,7 @@ class Transducer(pl.LightningModule):
         decoder_loss = self.ctc_decoder(encoder_out,
                                         encoder_out_lens,
                                         padded_labels,
-                                        label_lengths)
+                                        label_lengths).sum()
         return decoder_loss
 
     def configure_optimizers(self):

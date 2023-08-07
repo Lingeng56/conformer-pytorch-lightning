@@ -27,6 +27,8 @@ class Predictor(nn.Module):
         self.projection = nn.Linear(hidden_size, output_size)
         self.embed_size = embed_size
 
+        self.lstm.flatten_parameters()
+
 
     def init_state(
             self,
@@ -54,6 +56,7 @@ class Predictor(nn.Module):
 
         if states is None:
             states = self.init_state(inputs)
+            states = (states[0].to(embed.dtype), states[1].to(embed.dtype))
 
 
         outputs, states = self.lstm(embed, states)

@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES="0"
+export CUDA_VISIBLE_DEVICES="0,1"
 vocab_path="vocab.txt"
-ckpt_path="experiments/conformer-rnnt"
+ckpt_path="experiments/conformer-wenet-copy"
 resume_checkpoint="last.ckpt"
 data_config_path="exp/data_config.json"
 
@@ -35,7 +35,7 @@ python src/main.py --max_epochs 1000 \
                    --encoder_num_layers 12 \
                    --decoder_num_layers 3 \
                    --checkpoint_path $ckpt_path \
-                   --num_devices 1 \
+                   --num_devices 2 \
                    --train \
                    --predictor_embed_size 256 \
                    --predictor_hidden_size 256 \

@@ -46,7 +46,6 @@ class ConformerEncoder(nn.Module):
         inputs_pad_mask = ~make_pad_mask(input_lengths, max_seq_len).unsqueeze(1)
         outputs, pos_embed,  inputs_pad_mask = self.subsampling(inputs, inputs_pad_mask)
         inputs_attn_mask = ~make_attn_mask(inputs, inputs_pad_mask)
-        outputs = self.fc(outputs)
         for block in self.conformer_blocks:
             outputs, inputs_attn_mask = block(outputs, inputs_attn_mask, pos_embed, inputs_pad_mask)
         return outputs, inputs_pad_mask
