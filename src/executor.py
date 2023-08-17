@@ -140,10 +140,10 @@ class Executor:
             callbacks=[
                 RichModelSummary(),
                 RichProgressBar()],
-            check_val_every_n_epoch=1,
+            check_val_every_n_epoch=10,
             max_epochs=args.max_epochs,
             enable_progress_bar=True,
-            num_sanity_val_steps=2,
+            num_sanity_val_steps=0,
             gradient_clip_val=args.grad_clip,
             accumulate_grad_batches=args.accum_grad,
             precision=32

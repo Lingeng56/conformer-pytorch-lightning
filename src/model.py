@@ -89,7 +89,9 @@ class Transducer(nn.Module):
         return {'loss': loss,
                 'loss_attn': loss_attn,
                 'loss_ctc': loss_ctc,
-                'loss_rnnt': loss_rnnt}
+                'loss_rnnt': loss_rnnt,
+                'encoder_out': encoder_out,
+                'encoder_out_lens': encoder_out_lens}
 
     def rnnt_loss(self,
                   encoder_out,
@@ -149,8 +151,7 @@ class Transducer(nn.Module):
                                 label_lengths).sum()
         return decoder_loss
 
-
-
+    @torch.no_grad()
     def greedy_search(self,
                       speech,
                       speech_lengths,
@@ -164,6 +165,7 @@ class Transducer(nn.Module):
         return hyps
 
 
+    @torch.no_grad()
     def basic_greedy_search(
             self: torch.nn.Module,
             encoder_out: torch.Tensor,

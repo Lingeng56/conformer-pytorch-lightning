@@ -33,7 +33,7 @@ python src/main.py --max_epochs 1000 \
                    --am_only_scale 0.0 \
                    --num_heads 4 \
                    --grad_clip 4 \
-                   --accum_grad 1 \
+                   --accum_grad 2 \
                    --encoder_num_layers 12 \
                    --decoder_num_layers 3 \
                    --checkpoint_path $ckpt_path \

@@ -37,13 +37,24 @@ class TransducerModule(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         loss_dict = self.model(batch)
-        preds = self.predict_step(batch, batch_idx)
         loss_rnnt = loss_dict['loss_rnnt']
         loss_attn = loss_dict['loss_attn']
         loss_ctc = loss_dict['loss_ctc']
         loss = loss_dict['loss']
+        # encoder_out = loss_dict['encoder_out']
+        # encoder_out_lens = loss_dict['encoder_out_lens']
+        # hyps = self.model.basic_greedy_search(encoder_out[0:1], encoder_out_lens[0:1])
+        # pred = []
+        # for w in hyps:
+        #     if w == self.model.eos:
+        #         break
+        #     pred.append(self.char_dict[w])
+        # pred = ' '.join(pred)
         curr_lr = self.lr_schedulers().get_last_lr()[0]
-        self.train_wer.update(preds, transcripts)
+        # self.train_wer.update(pred, transcripts[0:1])
+
+        if self.global_step % 100 == 0 and self.local_rank == 0:
+            print(f'|Step {self.global_step} || Learning Rate: {curr_lr}|')
 
 
         self.log('train_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
@@ -54,8 +65,8 @@ class TransducerModule(pl.LightningModule):
                  batch_size=padded_feats.size(0))
         self.log('train_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
-        self.log('train_wer', self.train_wer.compute(), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
-                 batch_size=padded_feats.size(0))
+        # self.log('train_wer', self.train_wer.compute(), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
+        #          batch_size=padded_feats.size(0))
         self.log('lr', curr_lr, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
         return loss
@@ -100,12 +111,8 @@ class TransducerModule(pl.LightningModule):
                 content.append(self.char_dict[w])
             content = f'{key} {"_".join(content)}'
             self.out_stream.write(content + '\n')
-            preds.append(content)
+            preds.append(' '.join(content))
         return preds
-
-
-
-
 
 
 
