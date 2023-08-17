@@ -1,4 +1,4 @@
-export CUDA_VISIBLE_DEVICES="1"
+export CUDA_VISIBLE_DEVICES="0,1"
 vocab_path="vocab.txt"
 ckpt_path="experiments/conformer-wenet-copy"
 resume_checkpoint="last.ckpt"
@@ -37,7 +37,7 @@ python src/main.py --max_epochs 1000 \
                    --encoder_num_layers 12 \
                    --decoder_num_layers 3 \
                    --checkpoint_path $ckpt_path \
-                   --num_devices 1 \
+                   --num_devices 2 \
                    --predictor_embed_size 256 \
                    --predictor_hidden_size 256 \
                    --predictor_dim 256 \
@@ -47,9 +47,10 @@ python src/main.py --max_epochs 1000 \
                    --lr 0.001 \
                    --warmup 25000 \
                    --cmvn_path $cmvn_path \
-                   --eval \
                    --resume_from $ckpt_path/$resume_checkpoint \
                    --use_relative \
-                   --wenet_ckpt_path $wenet_ckpt_path \
+                   --train \
+#                   --wenet_ckpt_path $wenet_ckpt_path \
+#                   --train \
 #                   --train
 #                   --resume
