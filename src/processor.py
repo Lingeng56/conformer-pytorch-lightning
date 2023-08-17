@@ -3,8 +3,10 @@ import torchaudio.compliance.kaldi as kaldi
 import torch
 import random
 import re
+import math
 from torch.nn.utils.rnn import pad_sequence
-from tqdm import tqdm
+
+torchaudio.utils.sox_utils.set_buffer_size(16500)
 
 
 def parse_raw(sample):
@@ -15,7 +17,8 @@ def parse_raw(sample):
     sample = dict(
         key=key,
         transcript=transcript,
-        waveform=waveform,
+        wav_size=waveform.size(1),
+        wav_path=wav_file,
         sample_rate=sample_rate
     )
 
@@ -29,7 +32,7 @@ def filter_data(sample,
                 token_min_length,
                 min_output_input_ratio,
                 max_output_input_ratio):
-    num_frames = sample['waveform'].size(1) / sample['sample_rate'] * 100
+    num_frames = sample['wav_size'] / sample['sample_rate'] * 100
     if num_frames < min_length or num_frames > max_length:
         return False
 
@@ -57,7 +60,6 @@ def resample(sample, resample_rate=16000):
 def speed_perturb(sample, speeds=None):
     if speeds is None:
         speeds = [0.9, 1.0, 1.1]
-
 
     sample_rate = sample['sample_rate']
     waveform = sample['waveform']
@@ -106,7 +108,6 @@ def tokenize(sample,
     else:
         sp = None
 
-
     transcript = sample['transcript']
     if non_lang_syms_pattern is not None:
         parts = non_lang_syms_pattern.split(transcript.upper())
@@ -148,7 +149,6 @@ def spec_aug(sample,
              num_f_mask,
              max_t,
              max_f):
-
     x = sample['feat']
     y = x.clone().detach()
     max_frames = y.size(0)
@@ -167,10 +167,22 @@ def spec_aug(sample,
     return sample
 
 
-def compute_fbank(sample, transform):
+def compute_fbank(sample,
+                  num_mel_bins,
+                  frame_length,
+                  frame_shift,
+                  dither):
     waveform = sample['waveform']
-    feat = transform(waveform)
-    feat = feat.squeeze(0).permute(1, 0)
+    sample_rate = sample['sample_rate']
+    waveform = waveform * (1 << 15)
+    # Only keep key, feat, label
+    feat = kaldi.fbank(waveform,
+                       num_mel_bins=num_mel_bins,
+                       frame_length=frame_length,
+                       frame_shift=frame_shift,
+                       dither=dither,
+                       energy_floor=0.0,
+                       sample_frequency=sample_rate)
     sample = dict(key=sample['key'], label=sample['label'], feat=feat, transcript=sample['transcript'])
     return sample
 
@@ -227,7 +239,6 @@ def collate_fn(batch_):
     return keys, inputs, input_lengths, targets, target_lengths, sentences
 
 
-
 def shuffle(data, shuffle_size=10000):
     buf = []
     for sample in data:
@@ -243,22 +254,19 @@ def shuffle(data, shuffle_size=10000):
         yield x
 
 
-
-
 def sort(data, sort_size):
-    buf =[]
+    buf = []
     for sample in data:
         buf.append(sample)
         if len(buf) >= sort_size:
-            buf = sorted(buf, key=lambda item: item['feat'].size(0))
+            buf = sorted(buf, key=lambda item: item['wav_size'])
             for x in buf:
                 yield x
             buf = []
 
-    buf = sorted(buf, key=lambda item: item['feat'].size(0))
+    buf = sorted(buf, key=lambda item: item['wav_size'])
     for x in buf:
         yield x
-
 
 
 def static_batch(data, batch_size):
@@ -273,20 +281,22 @@ def static_batch(data, batch_size):
 
 
 def dynamic_batch(data, max_frames_in_batch):
+    dataset = []
     buf = []
     longest_frames = 0
     for sample in data:
-        longest_frames = max(longest_frames, sample['feat'].size(0))
+        longest_frames = max(longest_frames, math.ceil((sample['wav_size'] - 400) / 160) + 1)
         frames_after_padding = longest_frames * (len(buf) + 1)
         if frames_after_padding > max_frames_in_batch:
-            yield buf
+            dataset.append(buf)
             buf = [sample]
-            longest_frames = sample['feat'].size(0)
+            longest_frames = math.ceil((sample['wav_size'] - 400) / 160) + 1
         else:
             buf.append(sample)
 
     if len(buf) > 0:
-        yield buf
+        dataset.append(buf)
+    return dataset
 
 
 def batch(data, batch_type, **kwargs):
@@ -297,31 +307,27 @@ def batch(data, batch_type, **kwargs):
         return dynamic_batch(data, kwargs['max_frames_in_batch'])
 
 
-
-def padding(batched_data):
-    dataset = []
-    for data in tqdm(batched_data, desc='Batching Data...'):
-        feats_length = torch.tensor([x['feat'].size(0) for x in data], dtype=torch.int32)
-        order = torch.argsort(feats_length, descending=True)
-        feats_length = torch.tensor([data[i]['feat'].size(0) for i in order], dtype=torch.int32)
-        sorted_feats = [data[i]['feat'] for i in order]
-        sorted_keys = [data[i]['key'] for i in order]
-        sorted_labels = [torch.tensor(data[i]['label'], dtype=torch.int64) for i in order]
-        label_lengths = torch.tensor([x.size(0) for x in sorted_labels], dtype=torch.int32)
-        transcripts = [data[i]['transcript'] for i in order]
-        padded_feats = pad_sequence(sorted_feats,
-                                    batch_first=True,
-                                    padding_value=0)
-        padded_labels = pad_sequence(sorted_labels,
-                                     batch_first=True,
-                                     padding_value=0
-                                     )
-        dataset.append((
-            sorted_keys,
-            padded_feats,
-            feats_length,
-            padded_labels,
-            label_lengths,
-            transcripts
-        ))
-    return dataset
+def padding(data):
+    feats_length = torch.tensor([x['feat'].size(0) for x in data], dtype=torch.int32)
+    order = torch.argsort(feats_length, descending=True)
+    feats_length = torch.tensor([data[i]['feat'].size(0) for i in order], dtype=torch.int32)
+    sorted_feats = [data[i]['feat'] for i in order]
+    sorted_keys = [data[i]['key'] for i in order]
+    sorted_labels = [torch.tensor(data[i]['label'], dtype=torch.int64) for i in order]
+    label_lengths = torch.tensor([x.size(0) for x in sorted_labels], dtype=torch.int32)
+    transcripts = [data[i]['transcript'] for i in order]
+    padded_feats = pad_sequence(sorted_feats,
+                                batch_first=True,
+                                padding_value=0)
+    padded_labels = pad_sequence(sorted_labels,
+                                 batch_first=True,
+                                 padding_value=0
+                                 )
+    return (
+        sorted_keys,
+        padded_feats,
+        feats_length,
+        padded_labels,
+        label_lengths,
+        transcripts
+    )

@@ -1,5 +1,31 @@
 import torch
 import torch.nn as nn
+import json
+import math
+
+
+def load_cmvn(json_cmvn_file):
+    """ Load the json format cmvn stats file and calculate cmvn
+
+    Args:
+        json_cmvn_file: cmvn stats file in json format
+
+    Returns:
+        a numpy array of [means, vars]
+    """
+    with open(json_cmvn_file) as f:
+        cmvn_stats = json.load(f)
+
+    means = cmvn_stats['mean_stat']
+    variance = cmvn_stats['var_stat']
+    count = cmvn_stats['frame_num']
+    for i in range(len(means)):
+        means[i] /= count
+        variance[i] = variance[i] / count - means[i] * means[i]
+        if variance[i] < 1.0e-20:
+            variance[i] = 1.0e-20
+        variance[i] = 1.0 / math.sqrt(variance[i])
+    return torch.tensor(means), torch.tensor(variance)
 
 
 def pad_list(xs,
@@ -44,15 +70,15 @@ def load_vocabs(vocab_path):
     return vocabs, len(vocabs)
 
 
-def add_blank(targets, blank):
-    batch_size = targets.size(0)
+def add_blank(targets, blank, ignore_id):
+    bs = targets.size(0)
     _blank = torch.tensor([blank],
                           dtype=torch.long,
                           requires_grad=False,
                           device=targets.device)
-    _blank = _blank.repeat(batch_size).unsqueeze(1)
-    outputs = torch.cat([_blank, targets], dim=1)
-    return outputs
+    _blank = _blank.repeat(bs).unsqueeze(1)  # [bs,1]
+    out = torch.cat([_blank, targets], dim=1)  # [bs, Lmax+1]
+    return torch.where(out == ignore_id, blank, out)
 
 
 def make_pad_mask(input_lengths, max_seq_len):

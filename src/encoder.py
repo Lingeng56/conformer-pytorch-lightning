@@ -17,6 +17,7 @@ class ConformerEncoder(nn.Module):
                  hidden_dim,
                  num_heads,
                  encoder_num_layers,
+                 cmvn=None,
                  max_len=5000,
                  use_relative=False):
         super(ConformerEncoder, self).__init__()
@@ -25,8 +26,8 @@ class ConformerEncoder(nn.Module):
         else:
             self.position_encoding = PositionalEncoding(encoder_dim, pos_enc_dropout, max_len)
 
-        self.subsampling = ConvolutionSubSampling(input_dim=input_dim, output_dim=encoder_dim, pos_enc=self.position_encoding)
-        self.conformer_blocks = nn.ModuleList(
+        self.embed = ConvolutionSubSampling(input_dim=input_dim, output_dim=encoder_dim, pos_enc=self.position_encoding)
+        self.encoders = nn.ModuleList(
             [
                 ConformerEncoderLayer(encoder_dim,
                                       kernel_size,
@@ -39,13 +40,18 @@ class ConformerEncoder(nn.Module):
             ]
         )
         self.encoder_dim = encoder_dim
+        self.after_norm = nn.LayerNorm(encoder_dim, eps=1e-5)
+        self.global_cmvn = cmvn
 
 
     def forward(self, inputs, input_lengths):
+        if self.global_cmvn is not None:
+            inputs = self.global_cmvn(inputs)
         max_seq_len = inputs.size(1)
         inputs_pad_mask = ~make_pad_mask(input_lengths, max_seq_len).unsqueeze(1)
-        outputs, pos_embed,  inputs_pad_mask = self.subsampling(inputs, inputs_pad_mask)
-        inputs_attn_mask = ~make_attn_mask(inputs, inputs_pad_mask)
-        for block in self.conformer_blocks:
+        outputs, pos_embed,  inputs_pad_mask = self.embed(inputs, inputs_pad_mask)
+        inputs_attn_mask = make_attn_mask(inputs, inputs_pad_mask)
+        for block in self.encoders:
             outputs, inputs_attn_mask = block(outputs, inputs_attn_mask, pos_embed, inputs_pad_mask)
+        outputs = self.after_norm(outputs)
         return outputs, inputs_pad_mask

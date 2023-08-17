@@ -11,7 +11,7 @@ class TransducerJoint(nn.Module):
                  ):
         super(TransducerJoint, self).__init__()
 
-        self.activation = nn.Tanh()
+        self.activatoin = nn.Tanh()
         self.enc_ffn = nn.Linear(enc_output_size, join_dim)
         self.pred_ffn = nn.Linear(pred_output_size, join_dim)
         self.ffn_out = nn.Linear(join_dim, vocab_size)
@@ -33,6 +33,6 @@ class TransducerJoint(nn.Module):
             pred_out = pred_out.unsqueeze(1)
 
         out = enc_out + pred_out
-        out = self.activation(out)
+        out = self.activatoin(out)
         out = self.ffn_out(out)
         return out

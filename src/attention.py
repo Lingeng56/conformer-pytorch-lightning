@@ -28,11 +28,11 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         super(RelativeMultiHeadSelfAttentionModule, self).__init__()
         self.d_k = encoder_dim // num_heads
         self.num_heads = num_heads
-        self.pos_projection = nn.Linear(encoder_dim, encoder_dim)
-        self.w_key = nn.Linear(encoder_dim, encoder_dim)
-        self.w_query = nn.Linear(encoder_dim, encoder_dim)
-        self.w_value = nn.Linear(encoder_dim, encoder_dim)
-        self.projection = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_pos = nn.Linear(encoder_dim, encoder_dim, bias=False)
+        self.linear_k = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_q = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_v = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_out = nn.Linear(encoder_dim, encoder_dim)
         self.pos_bias_u = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.pos_bias_v = nn.Parameter(torch.Tensor(self.num_heads, self.d_k))
         self.dropout = nn.Dropout(dropout)
@@ -48,14 +48,14 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
                 inputs_attn_mask,
                 pos_embed):
         batch_size = query.size(0)
-        q = self.w_query(query).view(batch_size, -1, self.num_heads, self.d_k)
-        k = self.w_key(key).view(batch_size, -1, self.num_heads, self.d_k)
-        v = self.w_value(value).view(batch_size, -1, self.num_heads, self.d_k)
+        q = self.linear_q(query).view(batch_size, -1, self.num_heads, self.d_k)
+        k = self.linear_k(key).view(batch_size, -1, self.num_heads, self.d_k)
+        v = self.linear_v(value).view(batch_size, -1, self.num_heads, self.d_k)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         q = q.transpose(1, 2)
-        p = self.pos_projection(pos_embed).view(batch_size, 1, self.num_heads, self.d_k)
+        p = self.linear_pos(pos_embed).view(batch_size, -1, self.num_heads, self.d_k)
         p = p.transpose(1, 2)
 
         q_with_bias_u = (q + self.pos_bias_u).transpose(1, 2)
@@ -76,7 +76,7 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         outputs = torch.matmul(attn, v)
         outputs = (outputs.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k))
 
-        outputs = self.projection(outputs)
+        outputs = self.linear_out(outputs)
         return outputs
 
 
@@ -106,10 +106,10 @@ class MultiHeadSelfAttentionModule(nn.Module):
         super(MultiHeadSelfAttentionModule, self).__init__()
         self.d_k = encoder_dim // num_heads
         self.num_heads = num_heads
-        self.w_key = nn.Linear(encoder_dim, encoder_dim)
-        self.w_query = nn.Linear(encoder_dim, encoder_dim)
-        self.w_value = nn.Linear(encoder_dim, encoder_dim)
-        self.projection = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_k = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_q = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_v = nn.Linear(encoder_dim, encoder_dim)
+        self.linear_out = nn.Linear(encoder_dim, encoder_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self,
@@ -119,9 +119,9 @@ class MultiHeadSelfAttentionModule(nn.Module):
                 inputs_attn_mask,
                 pos_embed=None):
         batch_size = query.size(0)
-        q = self.w_query(query).view(batch_size, -1, self.num_heads, self.d_k)
-        k = self.w_key(key).view(batch_size, -1, self.num_heads, self.d_k)
-        v = self.w_value(value).view(batch_size, -1, self.num_heads, self.d_k)
+        q = self.linear_q(query).view(batch_size, -1, self.num_heads, self.d_k)
+        k = self.linear_k(key).view(batch_size, -1, self.num_heads, self.d_k)
+        v = self.linear_v(value).view(batch_size, -1, self.num_heads, self.d_k)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
@@ -136,7 +136,7 @@ class MultiHeadSelfAttentionModule(nn.Module):
         outputs = torch.matmul(attn, v)
         outputs = (outputs.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k))
 
-        outputs = self.projection(outputs)
+        outputs = self.linear_out(outputs)
         outputs = self.dropout(outputs)
 
         return outputs

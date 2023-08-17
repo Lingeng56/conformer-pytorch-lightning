@@ -73,7 +73,6 @@ class CustomDataset(Dataset):
                              batch_size=self.data_config['batch_size'],
                              max_frames_in_batch=self.data_config['max_frames_in_batch'])
 
-        self.dataset = padding(self.dataset)
         pickle.dump(self.dataset, open(self.data_config[f'{self.mode}_batched_pkl_path'], 'wb'))
 
 
@@ -99,37 +98,50 @@ class CustomDataset(Dataset):
             if not check:
                 continue
 
-            sample = resample(sample,
-                              resample_rate=self.data_config['resample_rate'])
-
-            if self.data_config['speed_perturb']:
-                sample = speed_perturb(sample,
-                                       speeds=self.data_config['speeds'])
-
-            if self.data_config['feat_type'] == 'fbank':
-                sample = compute_fbank(sample, self.fbank_transform)
-
-            elif self.data_config['feat_type'] == 'mfcc':
-                sample = compute_mfcc(sample,
-                                      num_mel_bins=self.data_config['num_mel_bins'],
-                                      frame_length=self.data_config['frame_length'],
-                                      dither=self.data_config['dither'],
-                                      num_ceps=self.data_config['num_ceps'],
-                                      high_freq=self.data_config['high_freq'],
-                                      low_freq=self.data_config['low_freq'])
-
-            if self.data_config['spec_aug']:
-                sample = spec_aug(sample,
-                                  num_t_mask=self.data_config['num_t_mask'],
-                                  num_f_mask=self.data_config['num_f_mask'],
-                                  max_t=self.data_config['max_t'],
-                                  max_f=self.data_config['max_f'],
-                                  )
             self.dataset.append(sample)
         pickle.dump(self.dataset, open(self.data_config[f'{self.mode}_pkl_path'], 'wb'))
 
+
+    def __prepare_sample(self, sample):
+        sample['waveform'], _ = torchaudio.load(sample['wav_path'])
+        sample = resample(sample,
+                          resample_rate=self.data_config['resample_rate'])
+
+        if self.data_config['speed_perturb']:
+            sample = speed_perturb(sample,
+                                   speeds=self.data_config['speeds'])
+
+        if self.data_config['feat_type'] == 'fbank':
+            sample = compute_fbank(sample,
+                                   num_mel_bins=self.data_config['num_mel_bins'],
+                                   frame_length=self.data_config['frame_length'],
+                                   frame_shift=self.data_config['frame_shift'],
+                                   dither=self.data_config['dither']
+                                   )
+
+        elif self.data_config['feat_type'] == 'mfcc':
+            sample = compute_mfcc(sample,
+                                  num_mel_bins=self.data_config['num_mel_bins'],
+                                  frame_length=self.data_config['frame_length'],
+                                  dither=self.data_config['dither'],
+                                  num_ceps=self.data_config['num_ceps'],
+                                  high_freq=self.data_config['high_freq'],
+                                  low_freq=self.data_config['low_freq'],
+                                  frame_shift=self.data_config['frame_shift'])
+
+        if self.data_config['spec_aug']:
+            sample = spec_aug(sample,
+                              num_t_mask=self.data_config['num_t_mask'],
+                              num_f_mask=self.data_config['num_f_mask'],
+                              max_t=self.data_config['max_t'],
+                              max_f=self.data_config['max_f'],
+                              )
+        return sample
+
     def __getitem__(self, idx):
-        return self.dataset[idx]
+        batch_data = self.dataset[idx]
+        batch_data = padding([self.__prepare_sample(sample) for sample in batch_data])
+        return batch_data
 
     def __len__(self):
         return len(self.dataset)

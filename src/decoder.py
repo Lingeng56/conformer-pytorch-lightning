@@ -11,15 +11,15 @@ class CTCDecoder(nn.Module):
                  encoder_dim,
                  dropout):
         super(CTCDecoder, self).__init__()
-        self.proj = nn.Linear(encoder_dim, vocab_size)
-        self.dropout = nn.Dropout(dropout)
-        self.criterion = nn.CTCLoss(reduction='sum')
+        self.ctc_lo = nn.Linear(encoder_dim, vocab_size)
+        self.ctc_loss = nn.CTCLoss(reduction='sum')
+        self.dropout = dropout
 
     def forward(self, encoder_out, encoder_out_lens, padded_labels, label_lengths):
-        logits = self.proj(self.dropout(encoder_out))
+        logits = self.ctc_lo(nn.functional.dropout(encoder_out, self.dropout))
         probs = logits.transpose(0, 1).log_softmax(2)
-        loss = self.criterion(probs.to(torch.float32), padded_labels, encoder_out_lens, label_lengths)
-        loss = loss / padded_labels.size(0)
+        loss = self.ctc_loss(probs.to(torch.float32), padded_labels, encoder_out_lens, label_lengths)
+        loss = loss / padded_labels.size(1)
         return loss
 
 
@@ -39,8 +39,8 @@ class TransformerDecoder(nn.Module):
         super(TransformerDecoder, self).__init__()
         self.embed = nn.Sequential(nn.Embedding(vocab_size, decoder_dim),
                                    PositionalEncoding(decoder_dim, positional_dropout))
-        self.norm = nn.LayerNorm(decoder_dim, eps=1e-5)
-        self.proj = nn.Linear(decoder_dim, vocab_size)
+        self.after_norm = nn.LayerNorm(decoder_dim, eps=1e-5)
+        self.output_layer = nn.Linear(decoder_dim, vocab_size)
         self.decoders = nn.ModuleList([
             TransformerDecoderLayer(decoder_dim,
                                     num_heads,
@@ -67,8 +67,8 @@ class TransformerDecoder(nn.Module):
         for layer in self.decoders:
             outputs, targets_mask, memory, memory_mask = layer(outputs, targets_mask, memory, memory_mask)
 
-        outputs = self.norm(outputs)
-        outputs = self.proj(outputs)
+        outputs = self.after_norm(outputs)
+        outputs = self.output_layer(outputs)
         output_lengths = targets_mask.sum(dim=1)
         return outputs, torch.tensor(0.0), output_lengths
 
@@ -87,7 +87,7 @@ class BiTransformerDecoder(nn.Module):
                  self_attention_dropout,
                  src_attention_dropout):
         super(BiTransformerDecoder, self).__init__()
-        self.left_encoder = TransformerDecoder(vocab_size,
+        self.left_decoder = TransformerDecoder(vocab_size,
                                                decoder_dim,
                                                num_heads,
                                                hidden_dim,
@@ -96,7 +96,7 @@ class BiTransformerDecoder(nn.Module):
                                                pos_enc_dropout,
                                                self_attention_dropout,
                                                src_attention_dropout)
-        self.right_encoder = TransformerDecoder(vocab_size,
+        self.right_decoder = TransformerDecoder(vocab_size,
                                                 decoder_dim,
                                                 num_heads,
                                                 hidden_dim,
@@ -114,8 +114,8 @@ class BiTransformerDecoder(nn.Module):
                 target_lengths,
                 r_targets,
                 reverse_weight):
-        left_outputs, right_outputs, output_lengths = self.left_encoder(memory, memory_mask, targets, target_lengths)
+        left_outputs, right_outputs, output_lengths = self.left_decoder(memory, memory_mask, targets, target_lengths)
         if reverse_weight > 0.0:
-            right_outputs, _, output_lengths = self.right_encoder(memory, memory_mask, r_targets, target_lengths)
+            right_outputs, _, output_lengths = self.right_decoder(memory, memory_mask, r_targets, target_lengths)
 
         return left_outputs, right_outputs, output_lengths

@@ -50,6 +50,8 @@ parser.add_argument('--train', action='store_true')
 parser.add_argument('--eval', action='store_true')
 parser.add_argument('--resume', action='store_true')
 parser.add_argument('--resume_from', type=str)
+parser.add_argument('--cmvn_path', type=str)
+parser.add_argument('--wenet_ckpt_path', type=str, default=None)
 args = parser.parse_args()
 
 # Execute Task
@@ -58,4 +60,4 @@ if args.train:
     executor.train()
 
 if args.eval:
-    executor.eval()
+    executor.predict()

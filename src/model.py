@@ -1,13 +1,11 @@
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
-import k2
+import torchaudio
 from utils import add_blank, add_sos_eos, reverse_sequence
-from scheduler import WarmupLR
 from label_smoothing_loss import LabelSmoothingLoss
 
 
-class Transducer(pl.LightningModule):
+class Transducer(nn.Module):
 
     def __init__(self,
                  encoder,
@@ -17,9 +15,9 @@ class Transducer(pl.LightningModule):
                  ctc,
                  vocab_size=5002,
                  blank=0,
-                 sos=2,
-                 eos=3,
-                 ignore_id=0,
+                 sos=5001,
+                 eos=5001,
+                 ignore_id=-1,
                  ctc_weight=0.0,
                  reverse_weight=0.0,
                  lsm_weight=0.0,
@@ -29,15 +27,15 @@ class Transducer(pl.LightningModule):
                  warmup_steps=25000,
                  lm_only_scale=0.25,
                  am_only_scale=0.0,
-                 lr=0.01
+                 wenet_ckpt_path=None
                  ):
         super(Transducer, self).__init__()
         # Define Model
         self.encoder = encoder
         self.predictor = predictor
         self.joint = joint
-        self.attention_decoder = attention_decoder
-        self.ctc_decoder = ctc
+        self.decoder = attention_decoder
+        self.ctc = ctc
 
         # Define Attributions
         self.ignore_id = ignore_id
@@ -54,20 +52,20 @@ class Transducer(pl.LightningModule):
         self.blank = blank
         self.sos = sos
         self.eos = eos
-        self.lr = lr
-
-        # For K2 RnntLoss
-        self.simple_am_proj = nn.Linear(self.encoder.encoder_dim, vocab_size)
-        self.simple_lm_proj = nn.Linear(self.predictor.embed_size, vocab_size)
 
         # For AttentionLoss
-        self.criterion_attn = LabelSmoothingLoss(
-                size=vocab_size,
-                padding_idx=ignore_id,
-                smoothing=lsm_weight
-            )
+        self.criterion_att = LabelSmoothingLoss(
+            size=vocab_size,
+            padding_idx=ignore_id,
+            smoothing=lsm_weight
+        )
 
-    def training_step(self, batch, batch_idx):
+        if wenet_ckpt_path is not None:
+            print('Load Wenet Checkpoint : %s' % wenet_ckpt_path)
+            checkpoint = torch.load(wenet_ckpt_path)
+            self.load_state_dict(checkpoint)
+
+    def forward(self, batch):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         encoder_out, encoder_mask = self.encoder(padded_feats, feats_length)
         encoder_out_lens = encoder_mask.squeeze(1).sum(1)
@@ -88,107 +86,29 @@ class Transducer(pl.LightningModule):
 
         loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
 
-        self.log('train_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('train_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('train_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('train_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('train_batch_size', encoder_out.size(0), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
-        encoder_out, encoder_mask = self.encoder(padded_feats, feats_length)
-        encoder_out_lens = encoder_mask.squeeze(1).sum(1)
-        loss_rnnt = self.rnnt_loss(encoder_out,
-                                   encoder_mask,
-                                   padded_labels,
-                                   label_lengths)
-
-        loss_attn = self.attn_loss(encoder_out,
-                                   encoder_mask,
-                                   padded_labels,
-                                   label_lengths)
-
-        loss_ctc = self.ctc_loss(encoder_out,
-                                 encoder_out_lens,
-                                 padded_labels,
-                                 label_lengths)
-
-        loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
-
-        self.log('valid_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('valid_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('valid_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
-        self.log('valid_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True, batch_size=encoder_out.size(0))
+        return {'loss': loss,
+                'loss_attn': loss_attn,
+                'loss_ctc': loss_ctc,
+                'loss_rnnt': loss_rnnt}
 
     def rnnt_loss(self,
                   encoder_out,
                   encoder_mask,
                   padded_labels,
                   label_lengths):
-        padded_labels_pad = add_blank(padded_labels, self.blank)
+        padded_labels_pad = add_blank(padded_labels, self.blank, self.ignore_id)
         predictor_out = self.predictor(padded_labels_pad)
-        steps = self.global_step
-        if steps > 2 * self.warmup_steps:
-            self.delay_penalty = 0.0
-        boundary = torch.zeros((encoder_out.size(0), 4),
-                               dtype=torch.int64,
-                               device=encoder_out.device)
-        boundary[:, 3] = encoder_mask.squeeze(1).sum(1)
-        boundary[:, 2] = label_lengths
-        rnnt_text = torch.where(padded_labels == self.ignore_id, 0, padded_labels)
-        lm = self.simple_lm_proj(predictor_out)
-        am = self.simple_am_proj(encoder_out)
-        with torch.cuda.amp.autocast(enabled=False):
-            simple_loss, (px_grad, py_grad) = k2.rnnt_loss_smoothed(
-                lm=lm.float(),
-                am=am.float(),
-                symbols=rnnt_text,
-                termination_symbol=self.blank,
-                lm_only_scale=self.lm_only_scale,
-                am_only_scale=self.am_only_scale,
-                boundary=boundary,
-                reduction="sum",
-                return_grad=True,
-                delay_penalty=self.delay_penalty,
-            )
-        ranges = k2.get_rnnt_prune_ranges(
-            px_grad=px_grad,
-            py_grad=py_grad,
-            boundary=boundary,
-            s_range=5,
-        )
-        am_pruned, lm_pruned = k2.do_rnnt_pruning(
-            am=self.joint.enc_ffn(encoder_out),
-            lm=self.joint.pred_ffn(predictor_out),
-            ranges=ranges,
-        )
-        logits = self.joint(
-            am_pruned,
-            lm_pruned,
-            pre_project=False,
-        )
-        with torch.cuda.amp.autocast(enabled=False):
-            pruned_loss = k2.rnnt_loss_pruned(
-                logits=logits.float(),
-                symbols=rnnt_text,
-                ranges=ranges,
-                termination_symbol=self.blank,
-                boundary=boundary,
-                reduction="sum",
-                delay_penalty=self.delay_penalty,
-            )
-        simple_loss_scale = 0.5
-        if steps < self.warmup_steps:
-            simple_loss_scale = (
-                    1.0 - (steps / self.warmup_steps) * (1.0 - simple_loss_scale))
-        pruned_loss_scale = 1.0
-        if steps < self.warmup_steps:
-            pruned_loss_scale = 0.1 + 0.9 * (steps / self.warmup_steps)
-        loss = (simple_loss_scale * simple_loss
-                + pruned_loss_scale * pruned_loss)
-        loss = loss / encoder_out.size(0)
-
+        joint_out = self.joint(encoder_out, predictor_out)
+        encoder_out_lens = encoder_mask.squeeze(1).sum(1)
+        rnnt_text = torch.where(padded_labels == self.ignore_id, self.blank, padded_labels).to(torch.int32)
+        rnnt_text_lengths = label_lengths.to(torch.int32)
+        encoder_out_lens = encoder_out_lens.to(torch.int32)
+        loss = torchaudio.functional.rnnt_loss(joint_out,
+                                               rnnt_text,
+                                               encoder_out_lens,
+                                               rnnt_text_lengths,
+                                               blank=self.blank,
+                                               reduction="mean")
         return loss
 
     def attn_loss(self,
@@ -200,16 +120,19 @@ class Transducer(pl.LightningModule):
         input_lengths = label_lengths + 1
         r_padded_labels = reverse_sequence(padded_labels, label_lengths, float(self.ignore_id))
         r_input_targets, r_output_targets = add_sos_eos(r_padded_labels, self.sos, self.eos, self.ignore_id)
-        decoder_out, r_decoder_out, _ = self.attention_decoder(encoder_out,
-                                                               encoder_mask,
-                                                               input_targets,
-                                                               input_lengths,
-                                                               r_input_targets,
-                                                               self.reverse_weight)
-        loss_attn = self.criterion_attn(decoder_out, output_targets)
+        decoder_out, r_decoder_out, _ = self.decoder(encoder_out,
+                                                     encoder_mask,
+                                                     input_targets,
+                                                     input_lengths,
+                                                     r_input_targets,
+                                                     self.reverse_weight)
+        batch_size, seq_len, _ = decoder_out.size()
+        loss_attn = self.criterion_att(decoder_out,
+                                       output_targets)
         r_loss_attn = torch.tensor(0.0)
         if self.reverse_weight > 0.0:
-            r_loss_attn = self.criterion_attn(r_decoder_out, r_output_targets)
+            r_loss_attn = self.criterion_att(r_decoder_out,
+                                             r_output_targets)
 
         loss_attn = loss_attn * (1 - self.reverse_weight) + self.reverse_weight * r_loss_attn
         loss_attn = loss_attn.sum()
@@ -220,13 +143,71 @@ class Transducer(pl.LightningModule):
                  encoder_out_lens,
                  padded_labels,
                  label_lengths):
-        decoder_loss = self.ctc_decoder(encoder_out,
-                                        encoder_out_lens,
-                                        padded_labels,
-                                        label_lengths).sum()
+        decoder_loss = self.ctc(encoder_out,
+                                encoder_out_lens,
+                                padded_labels,
+                                label_lengths).sum()
         return decoder_loss
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-        scheduler = WarmupLR(optimizer, warmup_steps=self.warmup_steps)
-        return [optimizer], [scheduler]
+
+
+    def greedy_search(self,
+                      speech,
+                      speech_lengths,
+                      n_steps=64):
+        encoder_out, encoder_mask = self.encoder(
+            speech,
+            speech_lengths
+        )
+        encoder_out_lens = encoder_mask.squeeze(1).sum()
+        hyps = self.basic_greedy_search(encoder_out, encoder_out_lens, n_steps=n_steps)
+        return hyps
+
+
+    def basic_greedy_search(
+            self: torch.nn.Module,
+            encoder_out: torch.Tensor,
+            encoder_out_lens: torch.Tensor,
+            n_steps: int = 64,
+    ):
+        # fake padding
+        padding = torch.zeros(1, 1).to(encoder_out.device)
+        # sos
+        pred_input_step = torch.tensor([self.blank]).reshape(1, 1).to(encoder_out.device)
+        cache = self.predictor.init_state(pred_input_step)
+        new_cache = []
+        t = 0
+        hyps = []
+        prev_out_nblk = True
+        pred_out_step = None
+        per_frame_max_noblk = n_steps
+        per_frame_noblk = 0
+        while t < encoder_out_lens:
+            encoder_out_step = encoder_out[:, t:t + 1, :]  # [1, 1, E]
+            if prev_out_nblk:
+                step_outs = self.predictor.forward_step(pred_input_step, padding,
+                                                        cache)  # [1, 1, P]
+                pred_out_step, new_cache = step_outs[0], step_outs[1]
+
+            joint_out_step = self.joint(encoder_out_step,
+                                        pred_out_step)  # [1,1,v]
+            joint_out_probs = joint_out_step.log_softmax(dim=-1)
+
+            joint_out_max = joint_out_probs.argmax(dim=-1).squeeze()  # []
+            if joint_out_max != self.blank:
+                hyps.append(joint_out_max.item())
+                prev_out_nblk = True
+                per_frame_noblk = per_frame_noblk + 1
+                pred_input_step = joint_out_max.reshape(1, 1)
+                # state_m, state_c =  clstate_out_m, state_out_c
+                cache = new_cache
+
+            if joint_out_max == self.blank or per_frame_noblk >= per_frame_max_noblk:
+                if joint_out_max == self.blank:
+                    prev_out_nblk = False
+                # TODO(Mddct): make t in chunk for streamming
+                # or t should't be too lang to predict none blank
+                t = t + 1
+                per_frame_noblk = 0
+
+        return hyps

@@ -1,7 +1,7 @@
 data_dir="/home/wuliu/datasets/LibriSpeech"
 save_dir="./data"
 vocab_path="vocab.txt"
-bpe_part="train-clean-100"
+bpe_part="train-960"
 bpe_model_prefix="bpe_model"
 bpe_type="bpe"
 vocab_size=5000

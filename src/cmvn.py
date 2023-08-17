@@ -1,10 +1,10 @@
 import torch
+from utils import load_cmvn
 
 
 class GlobalCMVN(torch.nn.Module):
     def __init__(self,
-                 mean: torch.Tensor,
-                 istd: torch.Tensor,
+                 cmvn_path,
                  norm_var: bool = True):
         """
         Args:
@@ -12,6 +12,7 @@ class GlobalCMVN(torch.nn.Module):
             istd (torch.Tensor): inverse std, std which is 1.0 / std
         """
         super().__init__()
+        mean, istd = load_cmvn(cmvn_path)
         assert mean.shape == istd.shape
         self.norm_var = norm_var
         # The buffer can be accessed from this module using self.mean

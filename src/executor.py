@@ -1,14 +1,20 @@
 import json
+import torch
 import pytorch_lightning as pl
 from encoder import ConformerEncoder
 from decoder import CTCDecoder, BiTransformerDecoder
 from joint import TransducerJoint
 from model import Transducer
-from predictor import Predictor
+from module import TransducerModule
+from predictor import RNNPredictor
 from utils import load_vocabs
 from torch.utils.data import DataLoader
 from dataset import CustomDataset
-from pytorch_lightning.callbacks import ModelCheckpoint, RichModelSummary, RichProgressBar
+from pytorch_lightning.callbacks import RichModelSummary, RichProgressBar
+from cmvn import GlobalCMVN
+
+
+torch.set_float32_matmul_precision('high')
 
 
 class Executor:
@@ -24,6 +30,11 @@ class Executor:
         data_config = json.load(open(args.data_config_path, 'r'))
         vocabs, vocab_size = load_vocabs(args.vocab_path)
         data_config['vocabs'] = vocabs
+        char_dict = {idx: w for w, idx in vocabs.items()}
+
+        cmvn = GlobalCMVN(
+            cmvn_path=args.cmvn_path
+        )
 
         conformer_encoder = ConformerEncoder(
             input_dim=args.input_dim,
@@ -36,7 +47,8 @@ class Executor:
             num_heads=args.num_heads,
             encoder_num_layers=args.encoder_num_layers,
             max_len=args.max_len,
-            use_relative=args.use_relative
+            use_relative=args.use_relative,
+            cmvn=cmvn
         )
         ctc_decoder = CTCDecoder(
             vocab_size=vocab_size,
@@ -57,41 +69,46 @@ class Executor:
             src_attention_dropout=args.src_attention_dropout
         )
 
-        predictor = Predictor(vocab_size=vocab_size,
-                              embed_size=args.predictor_embed_size,
-                              output_size=args.predictor_dim,
-                              hidden_size=args.predictor_hidden_size,
-                              embed_dropout=args.predictor_embed_dropout,
-                              num_layers=args.predictor_num_layers,
-                              )
+        predictor = RNNPredictor(vocab_size=vocab_size,
+                                 embed_size=args.predictor_embed_size,
+                                 output_size=args.predictor_dim,
+                                 hidden_size=args.predictor_hidden_size,
+                                 embed_dropout=args.predictor_embed_dropout,
+                                 num_layers=args.predictor_num_layers,
+                                 )
 
         joint = TransducerJoint(vocab_size=vocab_size,
                                 enc_output_size=args.encoder_dim,
                                 pred_output_size=args.predictor_dim,
                                 join_dim=args.join_dim)
 
-        self.model = Transducer(
-            encoder=conformer_encoder,
-            predictor=predictor,
-            joint=joint,
-            attention_decoder=attn_decoder,
-            ctc=ctc_decoder,
-            vocab_size=vocab_size,
-            blank=vocabs['<blank>'],
-            sos=vocabs['<bos>'],
-            eos=vocabs['<eos>'],
-            ignore_id=vocabs['<blank>'],
-            ctc_weight=args.ctc_weight,
-            reverse_weight=args.reverse_weight,
-            lsm_weight=args.lsm_weight,
-            transducer_weight=args.transducer_weight,
-            attention_weight=args.attention_weight,
-            delay_penalty=args.delay_penalty,
-            warmup_steps=args.warmup_steps,
-            lm_only_scale=args.lm_only_scale,
-            am_only_scale=args.am_only_scale,
-            lr=args.lr
-        )
+        self.model = TransducerModule(
+            Transducer(
+                encoder=conformer_encoder,
+                predictor=predictor,
+                joint=joint,
+                attention_decoder=attn_decoder,
+                ctc=ctc_decoder,
+                vocab_size=vocab_size,
+                blank=vocabs['<blank>'],
+                sos=vocabs['<sos/eos>'],
+                eos=vocabs['<sos/eos>'],
+                ignore_id=-1,
+                ctc_weight=args.ctc_weight,
+                reverse_weight=args.reverse_weight,
+                lsm_weight=args.lsm_weight,
+                transducer_weight=args.transducer_weight,
+                attention_weight=args.attention_weight,
+                delay_penalty=args.delay_penalty,
+                warmup_steps=args.warmup_steps,
+                lm_only_scale=args.lm_only_scale,
+                am_only_scale=args.am_only_scale,
+                wenet_ckpt_path=args.wenet_ckpt_path
+            ),
+            lr=args.lr,
+            ckpt_path=args.checkpoint_path,
+            char_dict=char_dict,
+            warmup_steps=25000)
 
     def __build_dataloader(self, args):
         data_config = json.load(open(args.data_config_path, 'r'))
@@ -117,28 +134,19 @@ class Executor:
                                           )
 
     def __build_trainer(self, args):
-        checkpoint_callback = ModelCheckpoint(
-            monitor='val_loss',
-            dirpath=args.checkpoint_path,
-            filename='{epoch}-{val_loss:.2f}',
-            save_last=True,
-            save_top_k=5,
-            mode='min',
-        )
-
         self.trainer = pl.Trainer(
             devices=args.num_devices,
             accelerator='gpu',
-            callbacks=[checkpoint_callback,
-                       RichModelSummary(),
-                       RichProgressBar()],
+            callbacks=[
+                RichModelSummary(),
+                RichProgressBar()],
             check_val_every_n_epoch=1,
             max_epochs=args.max_epochs,
             enable_progress_bar=True,
             num_sanity_val_steps=2,
             gradient_clip_val=args.grad_clip,
             accumulate_grad_batches=args.accum_grad,
-            precision=16
+            precision=32
         )
 
     def train(self):
@@ -147,5 +155,6 @@ class Executor:
                          val_dataloaders=self.test_dataloader,
                          ckpt_path=self.args.resume_from if self.args.resume else None)
 
-    def eval(self):
-        pass
+    def predict(self):
+        self.trainer.predict(self.model, self.test_dataloader)
+
