@@ -60,4 +60,4 @@ if args.train:
     executor.train()
 
 if args.eval:
-    executor.predict()
+    executor.eval()

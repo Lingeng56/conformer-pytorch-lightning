@@ -1,6 +1,7 @@
 import torch
 import pytorch_lightning as pl
 import os
+import sentencepiece as spm
 from scheduler import WarmupLR
 from torchmetrics import WordErrorRate
 
@@ -11,6 +12,7 @@ class TransducerModule(pl.LightningModule):
                  model,
                  ckpt_path,
                  char_dict,
+                 bpe_model,
                  warmup_steps=25000,
                  lr=0.01,
                  ):
@@ -30,43 +32,32 @@ class TransducerModule(pl.LightningModule):
         self.char_dict = char_dict
 
         # For metric
+        self.sp = spm.SentencePieceProcessor()
+        self.sp.load(bpe_model)
         self.train_wer = WordErrorRate()
         self.valid_wer = WordErrorRate()
+        self.validation_preds = []
+        self.validation_truth = []
 
 
     def training_step(self, batch, batch_idx):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         loss_dict = self.model(batch)
         loss_rnnt = loss_dict['loss_rnnt']
-        loss_attn = loss_dict['loss_attn']
+        # loss_attn = loss_dict['loss_attn']
         loss_ctc = loss_dict['loss_ctc']
         loss = loss_dict['loss']
-        # encoder_out = loss_dict['encoder_out']
-        # encoder_out_lens = loss_dict['encoder_out_lens']
-        # hyps = self.model.basic_greedy_search(encoder_out[0:1], encoder_out_lens[0:1])
-        # pred = []
-        # for w in hyps:
-        #     if w == self.model.eos:
-        #         break
-        #     pred.append(self.char_dict[w])
-        # pred = ' '.join(pred)
         curr_lr = self.lr_schedulers().get_last_lr()[0]
-        # self.train_wer.update(pred, transcripts[0:1])
-
-        if self.global_step % 100 == 0 and self.local_rank == 0:
-            print(f'|Step {self.global_step} || Learning Rate: {curr_lr}|')
 
 
         self.log('train_loss', loss, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
         self.log('train_ctc_loss', loss_ctc, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
-        self.log('train_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
-                 batch_size=padded_feats.size(0))
+        # self.log('train_attn_loss', loss_attn, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
+        #          batch_size=padded_feats.size(0))
         self.log('train_rnnt_loss', loss_rnnt, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
-        # self.log('train_wer', self.train_wer.compute(), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
-        #          batch_size=padded_feats.size(0))
         self.log('lr', curr_lr, prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
         return loss
@@ -76,29 +67,46 @@ class TransducerModule(pl.LightningModule):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         preds = self.predict_step(batch, batch_idx)
         self.valid_wer.update(preds, transcripts)
+        self.validation_truth += transcripts
+        self.validation_preds += preds
         self.log('valid_wer', self.valid_wer.compute(), prog_bar=True, sync_dist=True, on_step=True, on_epoch=True,
                  batch_size=padded_feats.size(0))
 
-
-
-    def on_validation_end(self):
+    def on_validation_epoch_start(self):
         if self.local_rank == 0:
+            self.out_stream = open('tmp_prediction.txt', 'w')
+
+    def on_validation_epoch_end(self):
+        if self.local_rank == 0:
+            self.validation_preds = self.all_gather(self.validation_preds)
+            self.validation_truth = self.all_gather(self.validation_truth)
             print('Saving checkpoint to %s' % self.ckpt_path)
-            path = os.path.join(self.ckpt_path, f'Epoch:{self.current_epoch}-Valid_WER:{self.valid_wer.compute()}.ckpt')
+            path = os.path.join(self.ckpt_path, f'Step:{self.global_step}-Valid_WER:{self.valid_wer(self.validation_preds, self.validation_preds):.6f}.ckpt')
             self.trainer.save_checkpoint(path)
             self.trainer.save_checkpoint(os.path.join(self.ckpt_path, 'last.ckpt'))
+            self.out_stream.close()
+        self.validation_preds = []
+        self.validation_truth = []
         self.trainer.strategy.barrier()
 
 
+
+    def on_predict_epoch_start(self):
+        if self.local_rank == 0:
+            self.out_stream = open('tmp_prediction.txt', 'w')
+        self.trainer.strategy.barrier()
+
     def on_predict_epoch_end(self):
-        self.out_stream.close()
+        if self.local_rank == 0:
+            self.out_stream.close()
+        self.trainer.strategy.barrier()
 
 
     @torch.no_grad()
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         sorted_keys, padded_feats, feats_length, padded_labels, label_lengths, transcripts = batch
         preds = []
-        for key, feat, feat_length in zip(sorted_keys, padded_feats, feats_length):
+        for key, feat, feat_length, transcript in zip(sorted_keys, padded_feats, feats_length, transcripts):
             feat = feat.unsqueeze(0)
             feat_length = feat_length.unsqueeze(0)
             hyps = self.model.greedy_search(feat,
@@ -109,9 +117,9 @@ class TransducerModule(pl.LightningModule):
                 if w == self.model.eos:
                     break
                 content.append(self.char_dict[w])
-            content = f'{key} {"_".join(content)}'
-            self.out_stream.write(content + '\n')
-            preds.append(' '.join(content))
+            text = f'Key: {key}\nPred: {self.sp.decode(content)}\nTruth: {transcript}'
+            self.out_stream.write(text + '\n')
+            preds.append(self.sp.decode(content))
         return preds
 
 

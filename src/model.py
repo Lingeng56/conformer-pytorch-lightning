@@ -34,7 +34,7 @@ class Transducer(nn.Module):
         self.encoder = encoder
         self.predictor = predictor
         self.joint = joint
-        self.decoder = attention_decoder
+        # self.decoder = attention_decoder
         self.ctc = ctc
 
         # Define Attributions
@@ -54,11 +54,11 @@ class Transducer(nn.Module):
         self.eos = eos
 
         # For AttentionLoss
-        self.criterion_att = LabelSmoothingLoss(
-            size=vocab_size,
-            padding_idx=ignore_id,
-            smoothing=lsm_weight
-        )
+        # self.criterion_att = LabelSmoothingLoss(
+        #     size=vocab_size,
+        #     padding_idx=ignore_id,
+        #     smoothing=lsm_weight
+        # )
 
         if wenet_ckpt_path is not None:
             print('Load Wenet Checkpoint : %s' % wenet_ckpt_path)
@@ -74,20 +74,21 @@ class Transducer(nn.Module):
                                    padded_labels,
                                    label_lengths)
 
-        loss_attn = self.attn_loss(encoder_out,
-                                   encoder_mask,
-                                   padded_labels,
-                                   label_lengths)
+        # loss_attn = self.attn_loss(encoder_out,
+        #                            encoder_mask,
+        #                            padded_labels,
+        #                            label_lengths)
 
         loss_ctc = self.ctc_loss(encoder_out,
                                  encoder_out_lens,
                                  padded_labels,
                                  label_lengths)
 
-        loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
+        # loss = self.ctc_weight * loss_ctc + self.attention_weight * loss_attn + self.transducer_weight * loss_rnnt
+        loss = self.ctc_weight * loss_ctc + self.transducer_weight * loss_rnnt
 
         return {'loss': loss,
-                'loss_attn': loss_attn,
+                # 'loss_attn': loss_attn,
                 'loss_ctc': loss_ctc,
                 'loss_rnnt': loss_rnnt,
                 'encoder_out': encoder_out,
@@ -113,32 +114,32 @@ class Transducer(nn.Module):
                                                reduction="mean")
         return loss
 
-    def attn_loss(self,
-                  encoder_out,
-                  encoder_mask,
-                  padded_labels,
-                  label_lengths):
-        input_targets, output_targets = add_sos_eos(padded_labels, self.sos, self.eos, self.ignore_id)
-        input_lengths = label_lengths + 1
-        r_padded_labels = reverse_sequence(padded_labels, label_lengths, float(self.ignore_id))
-        r_input_targets, r_output_targets = add_sos_eos(r_padded_labels, self.sos, self.eos, self.ignore_id)
-        decoder_out, r_decoder_out, _ = self.decoder(encoder_out,
-                                                     encoder_mask,
-                                                     input_targets,
-                                                     input_lengths,
-                                                     r_input_targets,
-                                                     self.reverse_weight)
-        batch_size, seq_len, _ = decoder_out.size()
-        loss_attn = self.criterion_att(decoder_out,
-                                       output_targets)
-        r_loss_attn = torch.tensor(0.0)
-        if self.reverse_weight > 0.0:
-            r_loss_attn = self.criterion_att(r_decoder_out,
-                                             r_output_targets)
-
-        loss_attn = loss_attn * (1 - self.reverse_weight) + self.reverse_weight * r_loss_attn
-        loss_attn = loss_attn.sum()
-        return loss_attn
+    # def attn_loss(self,
+    #               encoder_out,
+    #               encoder_mask,
+    #               padded_labels,
+    #               label_lengths):
+    #     input_targets, output_targets = add_sos_eos(padded_labels, self.sos, self.eos, self.ignore_id)
+    #     input_lengths = label_lengths + 1
+    #     r_padded_labels = reverse_sequence(padded_labels, label_lengths, float(self.ignore_id))
+    #     r_input_targets, r_output_targets = add_sos_eos(r_padded_labels, self.sos, self.eos, self.ignore_id)
+    #     decoder_out, r_decoder_out, _ = self.decoder(encoder_out,
+    #                                                  encoder_mask,
+    #                                                  input_targets,
+    #                                                  input_lengths,
+    #                                                  r_input_targets,
+    #                                                  self.reverse_weight)
+    #     batch_size, seq_len, _ = decoder_out.size()
+    #     loss_attn = self.criterion_att(decoder_out,
+    #                                    output_targets)
+    #     r_loss_attn = torch.tensor(0.0)
+    #     if self.reverse_weight > 0.0:
+    #         r_loss_attn = self.criterion_att(r_decoder_out,
+    #                                          r_output_targets)
+    #
+    #     loss_attn = loss_attn * (1 - self.reverse_weight) + self.reverse_weight * r_loss_attn
+    #     loss_attn = loss_attn.sum()
+    #     return loss_attn
 
     def ctc_loss(self,
                  encoder_out,

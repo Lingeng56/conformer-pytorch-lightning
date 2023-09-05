@@ -9,8 +9,10 @@ from module import TransducerModule
 from predictor import RNNPredictor
 from utils import load_vocabs
 from torch.utils.data import DataLoader
-from dataset import CustomDataset
+from dataset import IterableCustomDataset, NormalCustomDataset
+from processor import collate_fn
 from pytorch_lightning.callbacks import RichModelSummary, RichProgressBar
+from pytorch_lightning.loggers import WandbLogger
 from cmvn import GlobalCMVN
 
 
@@ -108,6 +110,7 @@ class Executor:
             lr=args.lr,
             ckpt_path=args.checkpoint_path,
             char_dict=char_dict,
+            bpe_model=data_config['bpe_model'],
             warmup_steps=25000)
 
     def __build_dataloader(self, args):
@@ -118,19 +121,23 @@ class Executor:
         cv_config['shuffle'] = False
         cv_config['speed_perturb'] = False
         cv_config['spec_aug'] = False
-        train_dataset = CustomDataset(data_config, mode='train')
-        test_dataset = CustomDataset(cv_config, mode='dev')
+        cv_config['batch_type'] = 'static'
+        cv_config['batch_size'] = 4
+        train_dataset = IterableCustomDataset(data_config, mode='train')
+        test_dataset = NormalCustomDataset(cv_config, mode='dev')
         self.train_dataloader = DataLoader(train_dataset,
                                            batch_size=None,
-                                           num_workers=args.num_workers,
-                                           pin_memory=args.pin_memory,
-                                           prefetch_factor=args.prefetch,
+                                           # num_workers=args.num_workers,
+                                           # pin_memory=args.pin_memory,
+                                           # prefetch_factor=args.prefetch,
+                                           # collate_fn=collate_fn
                                            )
         self.test_dataloader = DataLoader(test_dataset,
-                                          batch_size=None,
-                                          num_workers=args.num_workers,
-                                          pin_memory=args.pin_memory,
-                                          prefetch_factor=args.prefetch,
+                                          batch_size=1,
+                                          collate_fn=collate_fn,
+                                          # num_workers=args.num_workers,
+                                          # pin_memory=args.pin_memory,
+                                          # prefetch_factor=args.prefetch,
                                           )
 
     def __build_trainer(self, args):
@@ -139,11 +146,14 @@ class Executor:
             accelerator='gpu',
             callbacks=[
                 RichModelSummary(),
-                RichProgressBar()],
-            check_val_every_n_epoch=10,
-            max_epochs=args.max_epochs,
+                RichProgressBar()
+            ],
+            logger=WandbLogger(project='conformer-rnnt'),
+            val_check_interval=10000,
+            check_val_every_n_epoch=None,
+            max_epochs=1,
             enable_progress_bar=True,
-            num_sanity_val_steps=0,
+            num_sanity_val_steps=2,
             gradient_clip_val=args.grad_clip,
             accumulate_grad_batches=args.accum_grad,
             precision=32
@@ -155,6 +165,7 @@ class Executor:
                          val_dataloaders=self.test_dataloader,
                          ckpt_path=self.args.resume_from if self.args.resume else None)
 
-    def predict(self):
-        self.trainer.predict(self.model, self.test_dataloader)
+    def eval(self):
+        self.trainer.validate(self.model, self.test_dataloader,
+                              ckpt_path=self.args.resume_from if self.args.resume else None)
 

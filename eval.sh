@@ -49,9 +49,8 @@ python src/main.py --max_epochs 1000 \
                    --cmvn_path $cmvn_path \
                    --resume_from $ckpt_path/$resume_checkpoint \
                    --use_relative \
-                   --train \
-#                   --num_workers 48 \
-#                   --resume \
+                   --eval \
+                   --resume \
 #                   --wenet_ckpt_path $wenet_ckpt_path \
 #                   --train \
 #                   --train
