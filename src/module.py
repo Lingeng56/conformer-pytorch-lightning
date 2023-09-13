@@ -81,7 +81,7 @@ class TransducerModule(pl.LightningModule):
             self.validation_preds = self.all_gather(self.validation_preds)
             self.validation_truth = self.all_gather(self.validation_truth)
             print('Saving checkpoint to %s' % self.ckpt_path)
-            path = os.path.join(self.ckpt_path, f'Step:{self.global_step}-Valid_WER:{self.valid_wer(self.validation_preds, self.validation_preds):.6f}.ckpt')
+            path = os.path.join(self.ckpt_path, f'Step:{self.global_step}-Valid_WER:{self.valid_wer(self.validation_preds, self.validation_truth):.6f}.ckpt')
             self.trainer.save_checkpoint(path)
             self.trainer.save_checkpoint(os.path.join(self.ckpt_path, 'last.ckpt'))
             self.out_stream.close()

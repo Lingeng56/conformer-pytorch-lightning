@@ -71,7 +71,7 @@ if __name__ == '__main__':
     )
     parser.add_argument('--data_dir', type=str, required=True)
     parser.add_argument('--save_dir', type=str, required=True)
-    parser.add_argument('--parts', type=str, nargs=argparse.REMAINDER, required=True)
+    parser.add_argument('--parts', type=str, nargs='+', required=True)
     args_ = parser.parse_args()
     main(args_)
 

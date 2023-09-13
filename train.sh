@@ -50,9 +50,7 @@ python src/main.py --max_epochs 1000 \
                    --resume_from $ckpt_path/$resume_checkpoint \
                    --use_relative \
                    --train \
-#                   --num_workers 48 \
-#                   --resume \
+                   --resume \
 #                   --wenet_ckpt_path $wenet_ckpt_path \
 #                   --train \
 #                   --train
-#                   --resume

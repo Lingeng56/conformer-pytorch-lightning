@@ -1,20 +1,43 @@
 # conformer-pytorch-lightning
-Implement conformer with pytorch lightning
+Implement conformer-ctc-rnnt with pytorch lightning
 
 # Requirements
 - pytorch
 - torchaudio
 - torchmetrics
 - pytorch-lightning
+- wandb
 
-# Dataset
-``` python
-from torchaudio.datasets import LIBRISPEECH
+# Data Preprocessing
 
-
- train_dataset = LIBRISPEECH(root='data', url='train-clean-100', download=True)
- test_dataset = LIBRISPEECH(root='data', url='test-clean', download=True)
+## Collect Data List
+```shell
+python utils/collect_librispeech.py --data_dir [path of librispeech] --save_dir ./data --parts dev-clean dev-other test-clean test-other train-clean-100 train-clean-360 train-other-500
 ```
+
+## Build train-960
+```shell
+cd data
+mkdir -p train-960
+cd train-960
+cat ../train-clean-100/wav_paths.txt >> wav_paths.txt
+cat ../train-clean-360/wav_paths.txt >> wav_paths.txt
+cat ../train-other-500/wav_paths.txt >> wav_paths.txt
+cat ../train-clean-100/transcripts.txt >> transcripts.txt
+cat ../train-clean-360/transcripts.txt >> transcripts.txt
+cat ../train-other-500/transcripts.txt >> transcripts.txt
+cat ../train-clean-100/data.list >> data.list
+cat ../train-clean-360/data.list >> data.list
+cat ../train-other-500/data.list >> data.list
+wc -l wav_paths.txt
+# 281241 wav_paths.txt
+```
+
+## Build Vocabulary
+```shell
+
+```
+
 
 # Training
 
@@ -23,10 +46,9 @@ bash train.sh
 ```
 
 # Evaluation
-
-In order to save time, I directly used the test dataset when doing validation after each epoch, 
-so I just looked at the training log directly to get evaluation results.
-
+```shell
+bash eval.sh
+```
 
 # Inference
 
@@ -34,19 +56,7 @@ so I just looked at the training log directly to get evaluation results.
 
 
 # Experiments Result
-
-**TO BE CONTINUE...**
-
-
-# Problems
-
-1. Num of model's parameters don't match with paper
-2. Model can't converge well...
-
-
-# TODO
-
-1. Finding bugs allows the model to train properly for convergence
-2. Finish inference script
-3. Reproduce the results in the paper, at least close
-4. Complete the ablation experiment in the paper
+dev-clean 2.5%
+dev-other 9.2%
+test-clean 3.7%
+test-other 9.7%
