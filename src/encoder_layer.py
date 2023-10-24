@@ -50,21 +50,27 @@ class ConformerEncoderLayer(nn.Module):
                 inputs,
                 inputs_attn_mask,
                 pos_embed,
-                inputs_pad_mask=torch.ones((0, 0, 0), dtype=torch.bool)):
+                inputs_pad_mask=torch.ones((0, 0, 0), dtype=torch.bool),
+                attn_cache=torch.ones((0, 0, 0), dtype=torch.bool),
+                cnn_cache=torch.ones((0, 0, 0), dtype=torch.bool),):
         residual = inputs
         outputs = self.norm_ff_macaron(inputs)
         outputs = residual + 0.5 * self.dropout(self.feed_forward_macaron(outputs))
         residual = outputs
         outputs = self.norm_mha(outputs)
-        outputs = residual + self.dropout(self.self_attn(outputs, outputs, outputs, inputs_attn_mask, pos_embed))
+        outputs, new_attn_cache = self.self_attn(outputs, outputs, outputs, inputs_attn_mask, pos_embed, attn_cache)
+        outputs = residual + self.dropout(outputs)
         residual = outputs
         outputs = self.norm_conv(outputs)
-        outputs = residual + self.dropout(self.conv_module(outputs, inputs_pad_mask))
+        outputs, new_cnn_cache = self.conv_module(outputs, inputs_pad_mask, cnn_cache)
+        outputs = residual + self.dropout(outputs)
         residual = outputs
         outputs = self.norm_ff(outputs)
         outputs = residual + 0.5 * self.dropout(self.feed_forward(outputs))
         outputs = self.norm_final(outputs)
-        return outputs, inputs_attn_mask
+        return outputs, inputs_attn_mask, new_attn_cache, new_cnn_cache
+
+
 
 
 

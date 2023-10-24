@@ -120,14 +120,14 @@ class NormalCustomDataset(Dataset):
                                  non_lang_syms=self.data_config['non_lang_syms'],
                                  split_with_space=self.data_config['split_with_space']
                                  )
-        self.dataset = Processor(self.dataset,
-                                 filter_data,
-                                 max_length=self.data_config['max_length'],
-                                 min_length=self.data_config['min_length'],
-                                 token_max_length=self.data_config['token_max_length'],
-                                 token_min_length=self.data_config['token_min_length'],
-                                 min_output_input_ratio=self.data_config['min_output_input_ratio'],
-                                 max_output_input_ratio=self.data_config['max_output_input_ratio'])
+        # self.dataset = Processor(self.dataset,
+        #                          filter_data,
+        #                          max_length=self.data_config['max_length'],
+        #                          min_length=self.data_config['min_length'],
+        #                          token_max_length=self.data_config['token_max_length'],
+        #                          token_min_length=self.data_config['token_min_length'],
+        #                          min_output_input_ratio=self.data_config['min_output_input_ratio'],
+        #                          max_output_input_ratio=self.data_config['max_output_input_ratio'])
         self.dataset = Processor(self.dataset,
                                  resample,
                                  resample_rate=self.data_config['resample_rate']
@@ -210,14 +210,14 @@ class IterableCustomDataset(IterableDataset):
                                  non_lang_syms=self.data_config['non_lang_syms'],
                                  split_with_space=self.data_config['split_with_space']
                                  )
-        self.dataset = Processor(self.dataset,
-                                 filter_data,
-                                 max_length=self.data_config['max_length'],
-                                 min_length=self.data_config['min_length'],
-                                 token_max_length=self.data_config['token_max_length'],
-                                 token_min_length=self.data_config['token_min_length'],
-                                 min_output_input_ratio=self.data_config['min_output_input_ratio'],
-                                 max_output_input_ratio=self.data_config['max_output_input_ratio'])
+        # self.dataset = Processor(self.dataset,
+        #                          filter_data,
+        #                          max_length=self.data_config['max_length'],
+        #                          min_length=self.data_config['min_length'],
+        #                          token_max_length=self.data_config['token_max_length'],
+        #                          token_min_length=self.data_config['token_min_length'],
+        #                          min_output_input_ratio=self.data_config['min_output_input_ratio'],
+        #                          max_output_input_ratio=self.data_config['max_output_input_ratio'])
         self.dataset = Processor(self.dataset,
                                  resample,
                                  resample_rate=self.data_config['resample_rate']

@@ -111,7 +111,11 @@ class Executor:
             ckpt_path=args.checkpoint_path,
             char_dict=char_dict,
             bpe_model=data_config['bpe_model'],
-            warmup_steps=25000)
+            warmup_steps=25000,
+            streaming_eval=args.streaming_eval,
+            decoding_chunk_size=args.decoding_chunk_size,
+            num_decoding_left_chunks=args.num_decoding_left_chunks
+        )
 
     def __build_dataloader(self, args):
         data_config = json.load(open(args.data_config_path, 'r'))

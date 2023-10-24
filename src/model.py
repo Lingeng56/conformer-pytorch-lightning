@@ -27,9 +27,14 @@ class Transducer(nn.Module):
                  warmup_steps=25000,
                  lm_only_scale=0.25,
                  am_only_scale=0.0,
-                 wenet_ckpt_path=None
+                 wenet_ckpt_path=None,
+                 device='cuda:1'
                  ):
         super(Transducer, self).__init__()
+
+        self.device = device
+
+
         # Define Model
         self.encoder = encoder
         self.predictor = predictor
@@ -53,12 +58,13 @@ class Transducer(nn.Module):
         self.sos = sos
         self.eos = eos
 
-        # For AttentionLoss
-        # self.criterion_att = LabelSmoothingLoss(
-        #     size=vocab_size,
-        #     padding_idx=ignore_id,
-        #     smoothing=lsm_weight
-        # )
+        # For stream asr
+        self.attn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.cnn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.offset = 0
+        self.tmp_hyps = []
+
+
 
         if wenet_ckpt_path is not None:
             print('Load Wenet Checkpoint : %s' % wenet_ckpt_path)
@@ -73,11 +79,6 @@ class Transducer(nn.Module):
                                    encoder_mask,
                                    padded_labels,
                                    label_lengths)
-
-        # loss_attn = self.attn_loss(encoder_out,
-        #                            encoder_mask,
-        #                            padded_labels,
-        #                            label_lengths)
 
         loss_ctc = self.ctc_loss(encoder_out,
                                  encoder_out_lens,
@@ -114,33 +115,6 @@ class Transducer(nn.Module):
                                                reduction="mean")
         return loss
 
-    # def attn_loss(self,
-    #               encoder_out,
-    #               encoder_mask,
-    #               padded_labels,
-    #               label_lengths):
-    #     input_targets, output_targets = add_sos_eos(padded_labels, self.sos, self.eos, self.ignore_id)
-    #     input_lengths = label_lengths + 1
-    #     r_padded_labels = reverse_sequence(padded_labels, label_lengths, float(self.ignore_id))
-    #     r_input_targets, r_output_targets = add_sos_eos(r_padded_labels, self.sos, self.eos, self.ignore_id)
-    #     decoder_out, r_decoder_out, _ = self.decoder(encoder_out,
-    #                                                  encoder_mask,
-    #                                                  input_targets,
-    #                                                  input_lengths,
-    #                                                  r_input_targets,
-    #                                                  self.reverse_weight)
-    #     batch_size, seq_len, _ = decoder_out.size()
-    #     loss_attn = self.criterion_att(decoder_out,
-    #                                    output_targets)
-    #     r_loss_attn = torch.tensor(0.0)
-    #     if self.reverse_weight > 0.0:
-    #         r_loss_attn = self.criterion_att(r_decoder_out,
-    #                                          r_output_targets)
-    #
-    #     loss_attn = loss_attn * (1 - self.reverse_weight) + self.reverse_weight * r_loss_attn
-    #     loss_attn = loss_attn.sum()
-    #     return loss_attn
-
     def ctc_loss(self,
                  encoder_out,
                  encoder_out_lens,
@@ -151,6 +125,73 @@ class Transducer(nn.Module):
                                 padded_labels,
                                 label_lengths).sum()
         return decoder_loss
+
+    @torch.no_grad()
+    def greedy_search_streaming_eval(self,
+                                     inputs,
+                                     decoding_chunk_size,
+                                     num_decoding_left_chunks=-1,
+                                     n_steps=64
+                                     ):
+        subsampling_rate = 4
+        context = 7
+        stride = subsampling_rate * decoding_chunk_size
+        decoding_window = (decoding_chunk_size - 1) * subsampling_rate + context
+        num_frames = inputs.size(1)
+        attn_cache = torch.zeros((0, 0, 0, 0), device=inputs.device)
+        cnn_cache = torch.zeros((0, 0, 0, 0), device=inputs.device)
+        offset = 0
+        required_cache_size = decoding_chunk_size * num_decoding_left_chunks
+        hyps = []
+        for cur in range(0, num_frames - context + 1, stride):
+            end = min(cur + decoding_window, num_frames)
+            chunk_inputs = inputs[:, cur:end, :]
+            chunk_outputs, attn_cache, cnn_cache = self.encoder.forward_chunk(inputs=chunk_inputs,
+                                                                              offset=offset,
+                                                                              required_cache_size=required_cache_size,
+                                                                              attn_cache=attn_cache,
+                                                                              cnn_cache=cnn_cache
+                                                                              )
+            chunk_out_lens = torch.tensor([chunk_outputs.size(1)])
+            chunk_hyps = self.basic_greedy_search(
+                encoder_out=chunk_outputs,
+                encoder_out_lens=chunk_out_lens,
+                n_steps=n_steps
+            )
+            offset += chunk_outputs.size(1)
+            hyps += chunk_hyps
+
+        return hyps
+
+    def init_state(self):
+        print('Model Reset')
+        self.attn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.cnn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.offset = 0
+        self.tmp_hyps = []
+
+
+    @torch.no_grad()
+    def greedy_search_streaming_app(self,
+                                    chunk_inputs,
+                                    n_steps=64
+                                    ):
+        chunk_outputs, self.attn_cache, self.cnn_cache = self.encoder.forward_chunk(inputs=chunk_inputs,
+                                                                                    offset=self.offset,
+                                                                                    required_cache_size=-1,
+                                                                                    attn_cache=self.attn_cache,
+                                                                                    cnn_cache=self.cnn_cache
+                                                                                    )
+        chunk_out_lens = torch.tensor([chunk_outputs.size(1)])
+        chunk_hyps = self.basic_greedy_search(
+            encoder_out=chunk_outputs,
+            encoder_out_lens=chunk_out_lens,
+            n_steps=n_steps
+        )
+        self.offset += chunk_outputs.size(1)
+        self.tmp_hyps += chunk_hyps
+
+        return self.tmp_hyps
 
     @torch.no_grad()
     def greedy_search(self,
@@ -164,7 +205,6 @@ class Transducer(nn.Module):
         encoder_out_lens = encoder_mask.squeeze(1).sum()
         hyps = self.basic_greedy_search(encoder_out, encoder_out_lens, n_steps=n_steps)
         return hyps
-
 
     @torch.no_grad()
     def basic_greedy_search(
@@ -208,8 +248,6 @@ class Transducer(nn.Module):
             if joint_out_max == self.blank or per_frame_noblk >= per_frame_max_noblk:
                 if joint_out_max == self.blank:
                     prev_out_nblk = False
-                # TODO(Mddct): make t in chunk for streamming
-                # or t should't be too lang to predict none blank
                 t = t + 1
                 per_frame_noblk = 0
 

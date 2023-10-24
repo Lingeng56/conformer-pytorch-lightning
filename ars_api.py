@@ -2,9 +2,9 @@
 import requests
 
 
-url = "http://localhost:28083/recognize/"
+url = "http://demo.dengfeng.fun:28083/recognize/"
 api_key = "demo.dengfeng.fun"
-audio = open("samples/1.wav", "rb")  # 修改为你的音频路径
+audio = open("samples/t14.wav", "rb")  # 修改为你的音频路径
 content = {}
 files = {"audio": audio}
 response = requests.post(url, data=content, files=files)

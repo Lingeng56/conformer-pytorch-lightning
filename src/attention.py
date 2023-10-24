@@ -15,9 +15,19 @@ class RelativePositionalEncoding(nn.Module):
         self.pe[:, 0, 0::2] = torch.sin(position * div_term)
         self.pe[:, 0, 1::2] = torch.cos(position * div_term)
 
-    def forward(self, inputs):
-        pos_embed = self.pe[:inputs.size(0)].to(inputs.device).to(inputs.dtype)
+    def forward(self, inputs, offset=0):
+        self.pe = self.pe.to(inputs.device).to(inputs.dtype)
+        pos_embed = self.position_encoding(offset, inputs.size(0), False)
+        # pos_embed = self.pe[offset: offset+inputs.size(0)].to(inputs.device).to(inputs.dtype)
         return self.dropout(inputs), self.dropout(pos_embed)
+
+
+    def position_encoding(self, offset, size, apply_dropout=True):
+        pos_embed = self.pe[offset: offset+size]
+        if apply_dropout:
+            pos_embed = self.dropout(pos_embed)
+        return pos_embed
+
 
 
 
@@ -46,7 +56,8 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
                 key,
                 value,
                 inputs_attn_mask,
-                pos_embed):
+                pos_embed=None,
+                cache=torch.zeros((0, 0, 0, 0))):
         batch_size = query.size(0)
         q = self.linear_q(query).view(batch_size, -1, self.num_heads, self.d_k)
         k = self.linear_k(key).view(batch_size, -1, self.num_heads, self.d_k)
@@ -55,6 +66,15 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         q = q.transpose(1, 2)
+
+        if cache.size(0) > 0:
+            key_cache, value_cache = torch.split(
+                cache, cache.size(-1) // 2, dim=-1)
+            k = torch.cat([key_cache, k], dim=2)
+            v = torch.cat([value_cache, v], dim=2)
+
+        new_cache = torch.cat((k, v), dim=-1)
+
         p = self.linear_pos(pos_embed).view(batch_size, -1, self.num_heads, self.d_k)
         p = p.transpose(1, 2)
 
@@ -77,7 +97,7 @@ class RelativeMultiHeadSelfAttentionModule(nn.Module):
         outputs = (outputs.transpose(1, 2).contiguous().view(batch_size, -1, self.num_heads * self.d_k))
 
         outputs = self.linear_out(outputs)
-        return outputs
+        return outputs, new_cache
 
 
 
@@ -94,10 +114,17 @@ class PositionalEncoding(nn.Module):
         self.pe[:, 0, 0::2] = torch.sin(position * div_term)
         self.pe[:, 0, 1::2] = torch.cos(position * div_term)
 
-    def forward(self, inputs):
-        pos_embed = self.pe[:inputs.size(0)].to(inputs.device).to(inputs.dtype)
+    def forward(self, inputs, offset=0):
+        self.pe = self.pe.to(inputs.device).to(inputs.dtype)
+        pos_embed = self.position_encoding(offset, inputs.size(0), False)
         x = inputs + pos_embed
         return self.dropout(x), self.dropout(pos_embed)
+
+    def position_encoding(self, offset, size, apply_dropout=True):
+        pos_embed = self.pe[offset: offset+size]
+        if apply_dropout:
+            pos_embed = self.dropout(pos_embed)
+        return pos_embed
 
 
 class MultiHeadSelfAttentionModule(nn.Module):
@@ -117,7 +144,8 @@ class MultiHeadSelfAttentionModule(nn.Module):
                 key,
                 value,
                 inputs_attn_mask,
-                pos_embed=None):
+                pos_embed=None,
+                cache=torch.zeros((0, 0, 0, 0))):
         batch_size = query.size(0)
         q = self.linear_q(query).view(batch_size, -1, self.num_heads, self.d_k)
         k = self.linear_k(key).view(batch_size, -1, self.num_heads, self.d_k)
@@ -125,6 +153,15 @@ class MultiHeadSelfAttentionModule(nn.Module):
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
+
+        if cache.size(0) > 0:
+            key_cache, value_cache = torch.split(
+                cache, cache.size(-1) // 2, dim=-1)
+            k = torch.cat([key_cache, k], dim=2)
+            v = torch.cat([value_cache, v], dim=2)
+
+        new_cache = torch.cat((k, v), dim=-1)
+
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         if inputs_attn_mask.size(2) > 0:
             mask = inputs_attn_mask.unsqueeze(1).eq(0)
@@ -139,6 +176,6 @@ class MultiHeadSelfAttentionModule(nn.Module):
         outputs = self.linear_out(outputs)
         outputs = self.dropout(outputs)
 
-        return outputs
+        return outputs, new_cache
 
 

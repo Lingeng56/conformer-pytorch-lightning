@@ -1,10 +1,11 @@
 from dataclasses import dataclass
 
-device = "cuda:0"
+
 
 
 @dataclass
 class Common:
+    device = "cuda:1"
     data_config_path = "exp/data_config.json"
     vocab_path = "vocab.txt"
     cmvn_path = "data/train-960/global_cmvn"

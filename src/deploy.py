@@ -1,10 +1,13 @@
 import sys
+
 sys.path.append('/home/wuliu/workspace/conformer-pytorch-lightning/src')
 
 import json
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import torch
+import numpy as np
+import io
 from encoder import ConformerEncoder
 from decoder import CTCDecoder, BiTransformerDecoder
 from joint import TransducerJoint
@@ -13,9 +16,9 @@ from module import TransducerModule
 from predictor import RNNPredictor
 from utils import load_vocabs
 from cmvn import GlobalCMVN
-from deploy_common import Common, device
+from deploy_common import Common
 
-DEVICE = device
+DEVICE = Common.device
 
 
 def build_model():
@@ -77,27 +80,28 @@ def build_model():
                             join_dim=args.join_dim)
 
     model = Transducer(
-            encoder=conformer_encoder,
-            predictor=predictor,
-            joint=joint,
-            attention_decoder=attn_decoder,
-            ctc=ctc_decoder,
-            vocab_size=vocab_size,
-            blank=vocabs['<blank>'],
-            sos=vocabs['<sos/eos>'],
-            eos=vocabs['<sos/eos>'],
-            ignore_id=-1,
-            ctc_weight=args.ctc_weight,
-            reverse_weight=args.reverse_weight,
-            lsm_weight=args.lsm_weight,
-            transducer_weight=args.transducer_weight,
-            attention_weight=args.attention_weight,
-            delay_penalty=args.delay_penalty,
-            warmup_steps=args.warmup_steps,
-            lm_only_scale=args.lm_only_scale,
-            am_only_scale=args.am_only_scale,
-            wenet_ckpt_path=args.wenet_ckpt_path
-        )
+        encoder=conformer_encoder,
+        predictor=predictor,
+        joint=joint,
+        attention_decoder=attn_decoder,
+        ctc=ctc_decoder,
+        vocab_size=vocab_size,
+        blank=vocabs['<blank>'],
+        sos=vocabs['<sos/eos>'],
+        eos=vocabs['<sos/eos>'],
+        ignore_id=-1,
+        ctc_weight=args.ctc_weight,
+        reverse_weight=args.reverse_weight,
+        lsm_weight=args.lsm_weight,
+        transducer_weight=args.transducer_weight,
+        attention_weight=args.attention_weight,
+        delay_penalty=args.delay_penalty,
+        warmup_steps=args.warmup_steps,
+        lm_only_scale=args.lm_only_scale,
+        am_only_scale=args.am_only_scale,
+        wenet_ckpt_path=args.wenet_ckpt_path,
+        device=args.device
+    )
 
     module = TransducerModule(
         model,
@@ -114,10 +118,29 @@ def build_model():
     return module
 
 
+def preprocess_stream(audio_bytes):
+    waveform, sample_rate = torchaudio.load(audio_bytes)
+    waveform = torchaudio.transforms.Resample(
+        orig_freq=sample_rate, new_freq=16000
+    )(waveform)
+    waveform = waveform * (1 << 15)
+    feat = kaldi.fbank(waveform,
+                       num_mel_bins=80,
+                       frame_length=25,
+                       frame_shift=10,
+                       dither=0.1,
+                       energy_floor=0.0,
+                       sample_frequency=16000)
+    feat_length = torch.tensor(feat.size(0))
+
+    feat = feat.to(DEVICE).unsqueeze(0)
+    feat_length = feat_length.to(DEVICE).unsqueeze(0)
+
+    return feat, feat_length
+
+
 def preprocess(audio):
-    with open('temp.wav', 'wb') as f:
-        f.write(audio)
-    waveform, sample_rate = torchaudio.load('temp.wav')
+    waveform, sample_rate = torchaudio.io._compat.load_audio_fileobj(audio)
     waveform = torchaudio.transforms.Resample(
         orig_freq=sample_rate, new_freq=16000
     )(waveform)
@@ -125,11 +148,11 @@ def preprocess(audio):
     # Only keep key, feat, label
     feat = kaldi.fbank(waveform,
                        num_mel_bins=80,
-                       frame_length=10,
-                       frame_shift=25,
+                       frame_length=25,
+                       frame_shift=10,
                        dither=0.1,
                        energy_floor=0.0,
-                       sample_frequency=sample_rate)
+                       sample_frequency=16000)
     feat_length = torch.tensor(feat.size(0))
 
     feat = feat.to(DEVICE).unsqueeze(0)

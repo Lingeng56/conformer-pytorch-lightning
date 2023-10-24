@@ -93,8 +93,71 @@ def make_pad_mask(input_lengths, max_seq_len):
     return mask
 
 
-def make_attn_mask(inputs, inputs_pad_mask):
-    return inputs_pad_mask
+def subsequent_chunk_mask(
+        size,
+        chunk_size,
+        num_left_chunks,
+        device
+):
+    ret = torch.zeros(size, size, device=device, dtype=torch.bool)
+    for i in range(size):
+        if num_left_chunks < 0:
+            start = 0
+        else:
+            start = max((i // chunk_size - num_left_chunks) * chunk_size, 0)
+        ending = min((i // chunk_size + 1) * chunk_size, size)
+        ret[i, start:ending] = True
+
+    return ret
+
+
+
+def make_attn_mask(inputs,
+                   inputs_pad_mask,
+                   use_dynamic_chunk,
+                   use_dynamic_left_chunk,
+                   decoding_chunk_size,
+                   static_chunk_size,
+                   num_decoding_left_chunks):
+    max_len = inputs.size(1)
+    if use_dynamic_chunk:
+        if decoding_chunk_size < 0:
+            chunk_size = max_len
+            num_left_chunks = -1
+        elif decoding_chunk_size > 0:
+            chunk_size = decoding_chunk_size
+            num_left_chunks = num_decoding_left_chunks
+        else:
+            chunk_size = torch.randint(1, max_len, (1, )).item()
+            num_left_chunks = -1
+            if chunk_size > max_len // 2:
+                chunk_size = max_len
+            else:
+                chunk_size = chunk_size % 25 + 1
+                if use_dynamic_left_chunk:
+                    max_left_chunks = (max_len - 1)
+                    num_left_chunks = torch.randint(0, max_left_chunks, (1, )).item()
+        chunk_masks = subsequent_chunk_mask(max_len,
+                                            chunk_size,
+                                            num_left_chunks,
+                                            inputs.device)
+
+        chunk_masks = chunk_masks.unsqueeze(0)
+        chunk_masks = inputs_pad_mask & chunk_masks
+
+    elif static_chunk_size > 0:
+        num_left_chunks = num_decoding_left_chunks
+        chunk_masks = subsequent_chunk_mask(max_len,
+                                            static_chunk_size,
+                                            num_left_chunks,
+                                            inputs.device)
+        chunk_masks = chunk_masks.unsqueeze(0)
+        chunk_masks = inputs_pad_mask & chunk_masks
+
+    else:
+        chunk_masks = inputs_pad_mask
+
+    return chunk_masks
 
 
 def make_subsequent_mask(length, device):

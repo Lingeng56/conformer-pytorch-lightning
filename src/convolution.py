@@ -31,10 +31,13 @@ class ConvolutionModule(nn.Module):
                                          padding=0
                                          )
 
-    def forward(self, inputs, inputs_pad_mask):
+    def forward(self, inputs, inputs_pad_mask, cache=torch.zeros((0, 0, 0, 0))):
         inputs = inputs.transpose(1, 2)
         if inputs_pad_mask.size(2) > 0:
             inputs = inputs.masked_fill(~inputs_pad_mask, 0.0)
+
+        new_cache = torch.zeros((0, 0, 0), dtype=inputs.dtype, device=inputs.device)
+
         outputs = self.pointwise_conv1(inputs)
         outputs = self.glu(outputs)
         outputs = self.depthwise_conv(outputs)
@@ -43,7 +46,7 @@ class ConvolutionModule(nn.Module):
         outputs = self.pointwise_conv2(outputs)
         if inputs_pad_mask.size(2) > 0:
             outputs = outputs.masked_fill(~inputs_pad_mask, 0.0)
-        return outputs.transpose(1, 2)
+        return outputs.transpose(1, 2), new_cache
 
 
 class ConvolutionSubSampling(nn.Module):
@@ -64,10 +67,13 @@ class ConvolutionSubSampling(nn.Module):
         )
         self.pos_enc = pos_enc
 
-    def forward(self, inputs, inputs_pad_mask):
+    def forward(self, inputs, inputs_pad_mask, offset=0):
         inputs = inputs.unsqueeze(1)
         outputs = self.conv(inputs)
         batch_size, channel, seq_len, feature_dim = outputs.size()
         outputs = self.out(outputs.transpose(1, 2).contiguous().view(batch_size, seq_len, channel * feature_dim))
-        outputs, pos_embed = self.pos_enc(outputs)
+        outputs, pos_embed = self.pos_enc(outputs, offset)
         return outputs, pos_embed, inputs_pad_mask[:, :, 2::2][:, :, 2::2]
+
+    def position_encoding(self, offset, size):
+        return self.pos_enc.position_encoding(offset, size)

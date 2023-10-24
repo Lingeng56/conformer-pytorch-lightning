@@ -15,6 +15,9 @@ class TransducerModule(pl.LightningModule):
                  bpe_model,
                  warmup_steps=25000,
                  lr=0.01,
+                 streaming_eval=False,
+                 decoding_chunk_size=0,
+                 num_decoding_left_chunks=-1
                  ):
         super(TransducerModule, self).__init__()
         # Define Model
@@ -30,6 +33,9 @@ class TransducerModule(pl.LightningModule):
         # For predict
         self.out_stream = open('tmp_prediction.txt', 'w')
         self.char_dict = char_dict
+        self.streaming_eval = streaming_eval
+        self.decoding_chunk_size = decoding_chunk_size
+        self.num_decoding_left_chunks = num_decoding_left_chunks
 
         # For metric
         self.sp = spm.SentencePieceProcessor()
@@ -109,8 +115,15 @@ class TransducerModule(pl.LightningModule):
         for key, feat, feat_length, transcript in zip(sorted_keys, padded_feats, feats_length, transcripts):
             feat = feat.unsqueeze(0)
             feat_length = feat_length.unsqueeze(0)
-            hyps = self.model.greedy_search(feat,
-                                            feat_length)
+            if self.streaming_eval:
+                hyps = self.model.greedy_search_streaming_eval(
+                    feat,
+                    self.decoding_chunk_size,
+                    self.num_decoding_left_chunks
+                )
+            else:
+                hyps = self.model.greedy_search(feat,
+                                                feat_length)
 
             content = []
             for w in hyps:
