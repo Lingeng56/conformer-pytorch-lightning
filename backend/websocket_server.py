@@ -1,8 +1,18 @@
+import sys
+
+sys.path.append('/home/wuliu/workspace/conformer-pytorch-lightning')
+
 import asyncio
 import websockets
 import json
 import threading
 from six.moves import queue
+from src.deploy import build_model, preprocess_stream
+
+model = build_model()
+model.eval()
+
+print('Model Loaded')
 
 IP = '0.0.0.0'
 PORT = 8000
@@ -13,62 +23,33 @@ class Transcoder(object):
     Converts audio chunks to text
     """
 
-    def __init__(self, encoding, rate, language):
+    def __init__(self):
         self.buff = queue.Queue()
-        self.encoding = encoding
-        self.language = language
-        self.rate = rate
         self.closed = True
-        self.transcript = None
+        self.transcript = []
+
+    def init(self):
+        model.model.init_state()
+        self.buff = queue.Queue()
+        self.closed = True
+        # self.transcript = []
 
     def start(self):
         """Start up streaming speech call"""
-        threading.Thread(target=self.process).start()
+        threading.Thread(target=self.stream_recognize).start()
 
-    def response_loop(self, responses):
-        """
-        Pick up the final result of Speech to text conversion
-        """
-        for response in responses:
-            if not response.results:
+
+    def stream_recognize(self):
+        while True:
+            chunk_path = self.buff.get()
+            if chunk_path is None:
                 continue
-            result = response.results[0]
-            if not result.alternatives:
-                continue
-            transcript = result.alternatives[0].transcript
-            if result.is_final:
-                self.transcript = transcript
 
-    def process(self):
-        """
-        Audio stream recognition and result parsing
-        """
-        # You can add speech contexts for better recognition
-        audio_generator = self.stream_generator()
-        requests = (types.StreamingRecognizeRequest(audio_content=content)
-                    for content in audio_generator)
-
-        responses = client.streaming_recognize(streaming_config, requests)
-        try:
-            self.response_loop(responses)
-        except:
-            self.start()
-
-    def stream_generator(self):
-        while not self.closed:
-            chunk = self.buff.get()
-            if chunk is None:
-                return
-            data = [chunk]
-            while True:
-                try:
-                    chunk = self.buff.get(block=False)
-                    if chunk is None:
-                        return
-                    data.append(chunk)
-                except queue.Empty:
-                    break
-            yield b''.join(data)
+            chunk_inputs, chunk_inputs_len = preprocess_stream(chunk_path)
+            hyps = model.model.greedy_search_streaming_app(
+                chunk_inputs)
+            print(hyps)
+            self.transcript = hyps
 
     def write(self, data):
         """
@@ -77,33 +58,39 @@ class Transcoder(object):
         self.buff.put(data)
 
 
-async def audio_processor(websocket, path):
+async def audio_processor(websocket):
     """
     Collects audio from the stream, writes it to buffer and return the output of Google speech to text
     """
-    config = await websocket.recv()
-    if not isinstance(config, str):
-        print("ERROR, no config")
-        return
-    config = json.loads(config)
-    transcoder = Transcoder(
-        encoding=config["format"],
-        rate=config["rate"],
-        language=config["language"]
-    )
+    transcoder = Transcoder()
     transcoder.start()
     while True:
         try:
             data = await websocket.recv()
         except websockets.ConnectionClosed:
-            print("Connection closed")
-            break
-        transcoder.write(data)
-        transcoder.closed = False
-        if transcoder.transcript:
-            print(transcoder.transcript)
-            await websocket.send(transcoder.transcript)
-            transcoder.transcript = None
+            continue
+        try:
+            print('Transcoder init')
+            request = json.loads(data)
+            if request['signal'] == 1:
+                transcoder.closed = False
+            elif request['signal'] == 0:
+                transcoder.init()
+            continue
+        except Exception:
+            transcoder.write(data)
+            # transcoder.stream_recognize()
+
+        # content = []
+        # for w in transcoder.transcript:
+        #     if w == model.model.eos:
+        #         break
+        #     content.append(model.char_dict[w])
+        #
+        # content.append(model.sp.decode(content))
+        # print(' '.join(content))
+        await websocket.send(transcoder.transcript)
+        print(transcoder.transcript)
 
 
 start_server = websockets.serve(audio_processor, IP, PORT)

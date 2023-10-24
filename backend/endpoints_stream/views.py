@@ -12,7 +12,7 @@ model.eval()
 
 # Create your views here.
 @ensure_csrf_cookie
-def recognize(request):
+def stream_recognize(request):
     try:
         audio = request.FILES['audio']
         feat, feat_length = preprocess(audio)
@@ -32,3 +32,4 @@ def recognize(request):
             "message": str(e)
         }
     return JsonResponse(result)
+
