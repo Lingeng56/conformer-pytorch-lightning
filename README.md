@@ -12,7 +12,7 @@ Implement conformer-ctc-rnnt with pytorch lightning
 1. Data Preprocessing
 2. Training
 3. Evaluation
-4. Inference
+4. Experiment Results
 
 
 # Data Preprocessing
@@ -122,7 +122,7 @@ bash eval.sh
 ```
 
 
-# Experiments Result
+# Experiment Results
 | EVAL SET   | WER  |
 |------------|------|
 | dev-clean  | 2.5% |
