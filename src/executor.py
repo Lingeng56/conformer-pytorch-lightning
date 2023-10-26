@@ -50,25 +50,15 @@ class Executor:
             encoder_num_layers=args.encoder_num_layers,
             max_len=args.max_len,
             use_relative=args.use_relative,
-            cmvn=cmvn
+            cmvn=cmvn,
+            use_dynamic_chunk_size=args.use_dynamic_chunk_size,
+            use_dynamic_left_chunk=args.use_dynamic_left_chunk,
+            static_chunk_size=args.static_chunk_size
         )
         ctc_decoder = CTCDecoder(
             vocab_size=vocab_size,
             encoder_dim=args.encoder_dim,
             dropout=args.dropout
-        )
-
-        attn_decoder = BiTransformerDecoder(
-            vocab_size=vocab_size,
-            decoder_dim=args.encoder_dim,
-            num_heads=args.num_heads,
-            hidden_dim=args.hidden_dim,
-            num_layers=args.decoder_num_layers,
-            r_num_layers=args.decoder_num_layers,
-            dropout=args.dropout,
-            pos_enc_dropout=args.pos_enc_dropout,
-            self_attention_dropout=args.self_attention_dropout,
-            src_attention_dropout=args.src_attention_dropout
         )
 
         predictor = RNNPredictor(vocab_size=vocab_size,
@@ -89,7 +79,6 @@ class Executor:
                 encoder=conformer_encoder,
                 predictor=predictor,
                 joint=joint,
-                attention_decoder=attn_decoder,
                 ctc=ctc_decoder,
                 vocab_size=vocab_size,
                 blank=vocabs['<blank>'],

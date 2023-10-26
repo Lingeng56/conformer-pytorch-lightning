@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 import torchaudio
-from utils import add_blank, add_sos_eos, reverse_sequence
-from label_smoothing_loss import LabelSmoothingLoss
+from utils import add_blank
 
 
 class Transducer(nn.Module):
@@ -11,7 +10,6 @@ class Transducer(nn.Module):
                  encoder,
                  predictor,
                  joint,
-                 attention_decoder,
                  ctc,
                  vocab_size=5002,
                  blank=0,
@@ -27,12 +25,9 @@ class Transducer(nn.Module):
                  warmup_steps=25000,
                  lm_only_scale=0.25,
                  am_only_scale=0.0,
-                 wenet_ckpt_path=None,
-                 device='cuda:1'
+                 wenet_ckpt_path=None
                  ):
         super(Transducer, self).__init__()
-
-        self.device = device
 
 
         # Define Model
@@ -59,10 +54,12 @@ class Transducer(nn.Module):
         self.eos = eos
 
         # For stream asr
-        self.attn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
-        self.cnn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.attn_cache = torch.zeros((0, 0, 0, 0))
+        self.cnn_cache = torch.zeros((0, 0, 0, 0))
         self.offset = 0
         self.tmp_hyps = []
+        self.pred_input_step = None
+        self.pred_cache = None
 
 
 
@@ -153,10 +150,12 @@ class Transducer(nn.Module):
                                                                               cnn_cache=cnn_cache
                                                                               )
             chunk_out_lens = torch.tensor([chunk_outputs.size(1)])
-            chunk_hyps = self.basic_greedy_search(
+            chunk_hyps, (self.pred_input_step, self.pred_cache) = self.basic_greedy_search(
                 encoder_out=chunk_outputs,
                 encoder_out_lens=chunk_out_lens,
-                n_steps=n_steps
+                n_steps=n_steps,
+                cache=self.pred_cache,
+                pred_input_step=self.pred_input_step
             )
             offset += chunk_outputs.size(1)
             hyps += chunk_hyps
@@ -165,10 +164,12 @@ class Transducer(nn.Module):
 
     def init_state(self):
         print('Model Reset')
-        self.attn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
-        self.cnn_cache = torch.zeros((0, 0, 0, 0), device=self.device)
+        self.attn_cache = torch.zeros((0, 0, 0, 0))
+        self.cnn_cache = torch.zeros((0, 0, 0, 0))
         self.offset = 0
         self.tmp_hyps = []
+        self.pred_input_step = None
+        self.pred_cache = None
 
 
     @torch.no_grad()
@@ -183,10 +184,12 @@ class Transducer(nn.Module):
                                                                                     cnn_cache=self.cnn_cache
                                                                                     )
         chunk_out_lens = torch.tensor([chunk_outputs.size(1)])
-        chunk_hyps = self.basic_greedy_search(
+        chunk_hyps, (self.pred_input_step, self.pred_cache) = self.basic_greedy_search(
             encoder_out=chunk_outputs,
             encoder_out_lens=chunk_out_lens,
-            n_steps=n_steps
+            n_steps=n_steps,
+            cache=self.pred_cache,
+            pred_input_step=self.pred_input_step
         )
         self.offset += chunk_outputs.size(1)
         self.tmp_hyps += chunk_hyps
@@ -203,7 +206,7 @@ class Transducer(nn.Module):
             speech_lengths
         )
         encoder_out_lens = encoder_mask.squeeze(1).sum()
-        hyps = self.basic_greedy_search(encoder_out, encoder_out_lens, n_steps=n_steps)
+        hyps, _ = self.basic_greedy_search(encoder_out, encoder_out_lens, n_steps=n_steps)
         return hyps
 
     @torch.no_grad()
@@ -212,12 +215,22 @@ class Transducer(nn.Module):
             encoder_out: torch.Tensor,
             encoder_out_lens: torch.Tensor,
             n_steps: int = 64,
+            cache: torch.Tensor = None,
+            pred_input_step: torch.Tensor = None
     ):
         # fake padding
         padding = torch.zeros(1, 1).to(encoder_out.device)
         # sos
-        pred_input_step = torch.tensor([self.blank]).reshape(1, 1).to(encoder_out.device)
-        cache = self.predictor.init_state(pred_input_step)
+        if pred_input_step is None:
+            pred_input_step = torch.tensor([self.blank]).reshape(1, 1).to(encoder_out.device)
+        else:
+            pred_input_step = pred_input_step.to(encoder_out.device)
+
+        if cache is None:
+            cache = self.predictor.init_state(pred_input_step)
+        else:
+            cache = (cache[0].to(encoder_out.device), cache[1].to(encoder_out.device))
+
         new_cache = []
         t = 0
         hyps = []
@@ -251,4 +264,4 @@ class Transducer(nn.Module):
                 t = t + 1
                 per_frame_noblk = 0
 
-        return hyps
+        return hyps, (pred_input_step, cache)

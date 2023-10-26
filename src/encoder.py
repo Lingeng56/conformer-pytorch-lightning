@@ -61,7 +61,7 @@ class ConformerEncoder(nn.Module):
         max_seq_len = inputs.size(1)
         inputs_pad_mask = ~make_pad_mask(input_lengths, max_seq_len).unsqueeze(1)
         outputs, pos_embed, inputs_pad_mask = self.embed(inputs, inputs_pad_mask)
-        inputs_attn_mask = make_attn_mask(inputs,
+        inputs_attn_mask = make_attn_mask(outputs,
                                           inputs_pad_mask,
                                           self.use_dynamic_chunk_size,
                                           self.use_dynamic_left_chunk,
@@ -74,6 +74,7 @@ class ConformerEncoder(nn.Module):
         outputs = self.after_norm(outputs)
         return outputs, inputs_pad_mask
 
+
     def forward_chunk(self,
                       inputs,
                       offset,
@@ -81,6 +82,8 @@ class ConformerEncoder(nn.Module):
                       attn_cache,
                       cnn_cache,
                       inputs_attn_mask=torch.ones((0, 0, 0))):
+        attn_cache = attn_cache.to(inputs.device)
+        cnn_cache = cnn_cache.to(inputs.device)
         tmp_masks = torch.ones(1,
                                inputs.size(1),
                                device=inputs.device,

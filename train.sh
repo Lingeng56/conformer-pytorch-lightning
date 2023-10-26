@@ -1,6 +1,6 @@
-export CUDA_VISIBLE_DEVICES="0,1"
+export CUDA_VISIBLE_DEVICES="0"
 vocab_path="vocab.txt"
-ckpt_path="experiments/conformer-rnnt-ctc-960"
+ckpt_path="experiments/conformer-rnnt-ctc-960-stream"
 resume_checkpoint="last.ckpt"
 data_config_path="exp/data_config.json"
 cmvn_path="data/train-960/global_cmvn"
@@ -37,7 +37,7 @@ python src/main.py --max_epochs 1000 \
                    --encoder_num_layers 12 \
                    --decoder_num_layers 3 \
                    --checkpoint_path $ckpt_path \
-                   --num_devices 2 \
+                   --num_devices 1 \
                    --predictor_embed_size 256 \
                    --predictor_hidden_size 256 \
                    --predictor_dim 256 \
@@ -49,8 +49,10 @@ python src/main.py --max_epochs 1000 \
                    --cmvn_path $cmvn_path \
                    --resume_from $ckpt_path/$resume_checkpoint \
                    --use_relative \
+                   --use_dynamic_chunk_size \
+                   --use_dynamic_left_chunk \
                    --train \
-                   --resume \
+#                   --resume \
 #                   --wenet_ckpt_path $wenet_ckpt_path \
 #                   --train \
 #                   --train
