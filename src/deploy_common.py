@@ -40,5 +40,5 @@ class Common:
     warmup_steps = 25000
     lr = 0.001
     wenet_ckpt_path = None
-    resume_path = "experiments/conformer-rnnt-ctc-960/last.ckpt"
+    resume_path = "experiments/conformer-rnnt-ctc-960/best.ckpt"
     checkpoint_path = "experiments/conformer-rnnt-ctc-960"

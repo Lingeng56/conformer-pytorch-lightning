@@ -51,7 +51,7 @@ python src/main.py --max_epochs 1000 \
                    --use_relative \
                    --eval \
                    --resume \
-                   --streaming_eval \
+#                   --streaming_eval \
 #                   --wenet_ckpt_path $wenet_ckpt_path \
 #                   --train \
 #                   --train

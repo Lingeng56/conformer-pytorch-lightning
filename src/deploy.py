@@ -53,19 +53,6 @@ def build_model():
         dropout=args.dropout
     )
 
-    attn_decoder = BiTransformerDecoder(
-        vocab_size=vocab_size,
-        decoder_dim=args.encoder_dim,
-        num_heads=args.num_heads,
-        hidden_dim=args.hidden_dim,
-        num_layers=args.decoder_num_layers,
-        r_num_layers=args.decoder_num_layers,
-        dropout=args.dropout,
-        pos_enc_dropout=args.pos_enc_dropout,
-        self_attention_dropout=args.self_attention_dropout,
-        src_attention_dropout=args.src_attention_dropout
-    )
-
     predictor = RNNPredictor(vocab_size=vocab_size,
                              embed_size=args.predictor_embed_size,
                              output_size=args.predictor_dim,
@@ -83,7 +70,6 @@ def build_model():
         encoder=conformer_encoder,
         predictor=predictor,
         joint=joint,
-        attention_decoder=attn_decoder,
         ctc=ctc_decoder,
         vocab_size=vocab_size,
         blank=vocabs['<blank>'],
@@ -100,7 +86,6 @@ def build_model():
         lm_only_scale=args.lm_only_scale,
         am_only_scale=args.am_only_scale,
         wenet_ckpt_path=args.wenet_ckpt_path,
-        device=args.device
     )
 
     module = TransducerModule(

@@ -140,6 +140,8 @@ class Transducer(nn.Module):
         offset = 0
         required_cache_size = decoding_chunk_size * num_decoding_left_chunks
         hyps = []
+        pred_cache = None
+        pred_input_step = None
         for cur in range(0, num_frames - context + 1, stride):
             end = min(cur + decoding_window, num_frames)
             chunk_inputs = inputs[:, cur:end, :]
@@ -150,12 +152,12 @@ class Transducer(nn.Module):
                                                                               cnn_cache=cnn_cache
                                                                               )
             chunk_out_lens = torch.tensor([chunk_outputs.size(1)])
-            chunk_hyps, (self.pred_input_step, self.pred_cache) = self.basic_greedy_search(
+            chunk_hyps, (pred_input_step, pred_cache) = self.basic_greedy_search(
                 encoder_out=chunk_outputs,
                 encoder_out_lens=chunk_out_lens,
                 n_steps=n_steps,
-                cache=self.pred_cache,
-                pred_input_step=self.pred_input_step
+                cache=None,
+                pred_input_step=None
             )
             offset += chunk_outputs.size(1)
             hyps += chunk_hyps
@@ -201,7 +203,7 @@ class Transducer(nn.Module):
                       speech,
                       speech_lengths,
                       n_steps=64):
-        encoder_out, encoder_mask = self.encoder(
+        encoder_out, encoder_mask = self.encoder.forward_chunk_by_chunk(
             speech,
             speech_lengths
         )

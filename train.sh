@@ -52,7 +52,8 @@ python src/main.py --max_epochs 1000 \
                    --use_dynamic_chunk_size \
                    --use_dynamic_left_chunk \
                    --train \
-#                   --resume \
+#                   --streaming_eval \
+                   --resume
 #                   --wenet_ckpt_path $wenet_ckpt_path \
 #                   --train \
 #                   --train
