@@ -1,7 +1,9 @@
 import sys
 import gradio as gr
 
-sys.path.append('/home/wuliu/workspace/conformer-pytorch-lightning')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from src.deploy import build_model, preprocess_stream
 
 model = build_model()
@@ -25,7 +27,7 @@ def transcribe(new_chunk_path):
 
 demo = gr.Interface(
         transcribe,
-        [gr.Audio(source="microphone", streaming=True, type='filepath')],
+        [gr.Audio(sources=["microphone"], streaming=True, type='filepath', min_length=1)],
         ["text"],
         live=True,
     )

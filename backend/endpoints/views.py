@@ -1,6 +1,6 @@
 import sys
-
-sys.path.append('/home/wuliu/workspace/conformer-pytorch-lightning')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from django.http import JsonResponse
 from src.deploy import build_model, preprocess
