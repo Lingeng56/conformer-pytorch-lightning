@@ -149,7 +149,8 @@ class Executor:
             num_sanity_val_steps=2,
             gradient_clip_val=args.grad_clip,
             accumulate_grad_batches=args.accum_grad,
-            precision=32
+            precision=32,
+            use_distributed_sampler=False
         )
 
     def train(self):
